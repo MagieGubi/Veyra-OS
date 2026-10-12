@@ -1,0 +1,20 @@
+# Holt Referenzdaten fuer neue Quellen (Versionen und MD5 aus Linux From Scratch 12.4).
+# Laeuft nur, wenn sich diese Datei aendert, oder per Knopfdruck.
+name: Quellen-Erkundung
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/probe.yml']
+  workflow_dispatch:
+
+jobs:
+  lfs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: LFS 12.4 (systemd) Paketliste und MD5
+        run: |
+          for f in wget-list-systemd md5sums; do
+            echo "--- $f ---"
+            curl -fsSL --retry 3 "https://www.linuxfromscratch.org/lfs/view/12.4-systemd/$f"
+          done

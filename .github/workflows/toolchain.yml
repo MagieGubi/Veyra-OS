@@ -5,7 +5,13 @@ name: Toolchain
 on:
   push:
     branches: [main]
+    paths-ignore: ['.github/workflows/probe.yml', 'docs/**']
   workflow_dispatch:
+
+# Ein neuer Push ersetzt einen laufenden Build (gleiche Caches, sonst doppelte Arbeit).
+concurrency:
+  group: toolchain-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   vpkg:
