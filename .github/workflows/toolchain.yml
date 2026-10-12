@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh tests/vpkg/run.sh
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh tests/vpkg/run.sh
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
 
@@ -191,3 +191,56 @@ jobs:
           else
             echo "FEHLER: die beiden Kernel-Builds unterscheiden sich" >&2; exit 1
           fi
+
+  stage4a:
+    name: Basissystem in chroot (Stufe 4a)
+    needs: temptools
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fertige Stufe 4a aus dem Cache holen
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: stage4a-${{ hashFiles('toolchain/**', 'temptools/**', 'stage4/**', 'build/container/Dockerfile', 'build/scripts/ci-toolchain.sh', 'build/scripts/ci-temptools.sh', 'build/scripts/ci-stage4a.sh') }}
+
+      - name: Stufe 3 holen
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: temptools-stage3
+          path: in
+
+      - name: Platz auf dem Runner schaffen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Bootstrap-Container bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: docker build -t veyra-bootstrap build/container
+
+      - name: Stufe 4a in chroot bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out
+          docker run --rm --privileged -v "$PWD:/repo:ro" -v "$PWD/in:/in:ro" -v "$PWD/out:/out" veyra-bootstrap /repo/build/scripts/ci-stage4a.sh
+
+      - name: Pruefsummen
+        run: sudo chown -R "$(id -u):$(id -g)" out && cd out && sha256sum veyra-stage4a.tar.zst | tee SHA256SUMS
+
+      - name: Ergebnis hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4a
+          path: |
+            out/veyra-stage4a.tar.zst
+            out/stage4-sources.lock
+            out/build-stage4a.log
+            out/SHA256SUMS
+          retention-days: 14
+
+      - name: Gesperrte Quellen anzeigen
+        run: cat out/stage4-sources.lock
