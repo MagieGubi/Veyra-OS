@@ -28,19 +28,38 @@ trap 'rm -rf "$GNUPGHOME"' EXIT
 keys_ready=0
 setup_keys() {
   [ $keys_ready = 1 ] && return
-  curl -fsSL --retry 3 -o "$GNUPGHOME/gnu-keyring.gpg" https://ftp.gnu.org/gnu/gnu-keyring.gpg
+  dl https://ftp.gnu.org/gnu/gnu-keyring.gpg "$GNUPGHOME/gnu-keyring.gpg" || die "GNU-Keyring nicht ladbar"
   gpg -q --import "$GNUPGHOME/gnu-keyring.gpg" 2>/dev/null
   gpg -q --auto-key-locate clear,wkd --locate-keys torvalds@kernel.org gregkh@kernel.org >/dev/null 2>&1 \
     || die "Kernel-Schluessel nicht per WKD abrufbar"
   keys_ready=1
 }
 
+# Download mit Wiederholungen. GNU-Dateien kommen bei Problemen von Spiegelservern;
+# das ist sicher, weil danach SHA-256 bzw. Signatur geprueft wird.
+dl() {
+  local url=$1 out=$2 u
+  local -a urls=("$url")
+  if [[ $url == https://ftp.gnu.org/gnu/* ]]; then
+    urls+=("https://ftpmirror.gnu.org/gnu/${url#https://ftp.gnu.org/gnu/}"
+           "https://mirrors.kernel.org/gnu/${url#https://ftp.gnu.org/gnu/}")
+  fi
+  for u in "${urls[@]}"; do
+    if curl -fsSL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 900 -o "$out.part" "$u"; then
+      mv "$out.part" "$out"
+      return 0
+    fi
+    echo "   Download fehlgeschlagen: $u" >&2
+  done
+  rm -f "$out.part"
+  return 1
+}
+
 grep -vE '^\s*(#|$)' "$list" | while read -r url sig; do
   file=${url##*/}
   if [ ! -f "$dest/$file" ]; then
     echo ">> Lade $file"
-    curl -fsSL --retry 3 -o "$dest/$file.part" "$url"
-    mv "$dest/$file.part" "$dest/$file"
+    dl "$url" "$dest/$file" || die "Download nicht moeglich: $file"
   fi
   expected=$(awk -v f="$file" '$2 == f {print $1}' "$lock")
   if [ -n "$expected" ]; then
@@ -58,7 +77,7 @@ grep -vE '^\s*(#|$)' "$list" | while read -r url sig; do
     continue
   fi
   setup_keys
-  curl -fsSL --retry 3 -o "$dest/${sig##*/}" "$sig"
+  dl "$sig" "$dest/${sig##*/}" || die "Signatur nicht ladbar: $file"
   case $sig in
     *.sign) xz -cd "$dest/$file" | gpg -q --verify "$dest/${sig##*/}" - 2>/dev/null ;;
     *)      gpg -q --verify "$dest/${sig##*/}" "$dest/$file" 2>/dev/null ;;
