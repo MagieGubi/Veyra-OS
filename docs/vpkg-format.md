@@ -95,3 +95,18 @@ Auf dem Zielsystem übernimmt das später VPKG selbst.
 Installieren, Entfernen, Abhängigkeitsauflösung, Konflikterkennung, Transaktionen und
 Repository-Index kommen mit VPKG 0.1. VPKG 0.1 wird nicht atomar sein (siehe
 docs/architecture.md).
+
+## Optionale Funktion post_install()
+
+Ein Rezept darf `post_install()` definieren. Sie läuft nach dem Auspacken im Zielsystem,
+für Schritte, die den Zustand des Systems ändern und keiner Datei im Paket entsprechen
+(zum Beispiel Locales erzeugen oder `pwconv`). Beim Bau des Basissystems ruft
+`stage4/chroot/30-packages.sh` sie auf; VPKG 0.1 übernimmt das später beim Installieren.
+
+## Basissystem (Stufe 4b)
+
+Die Pakete in `packages/core/` werden im Zielsystem selbst gebaut, in der Reihenfolge von
+`stage4/order-N.list`, und jedes wird sofort installiert. Weil es dort anfangs noch kein zstd
+gibt, schreibt `vpkg-build --no-compress` das unkomprimierte tar; außerhalb wird es mit
+`zstd -19 -T1` zur `.vpkg`-Datei (bit-gleich mit dem direkten Weg, siehe Test 5).
+Leere `sha256sums` werden mit `--lock` aus den gepinnten Quellen ergänzt.

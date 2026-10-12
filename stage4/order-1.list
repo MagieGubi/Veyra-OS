@@ -1,0 +1,26 @@
+# Stufe 4b, Teil 1: Kern des Basissystems als VPKG-Pakete (Reihenfolge wie LFS 12.4, Kapitel 8).
+# Testsuiten laufen in Core 0.1 noch nicht mit (Tcl, Expect und DejaGNU fehlen bewusst).
+iana-etc
+glibc
+tzdata
+zlib
+bzip2
+xz
+lz4
+zstd
+file
+readline
+m4
+bc
+flex
+pkgconf
+binutils
+gmp
+mpfr
+mpc
+attr
+acl
+libcap
+libxcrypt
+shadow
+gcc
