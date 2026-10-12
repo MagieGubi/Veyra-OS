@@ -19,7 +19,7 @@
    bash, coreutils, diffutils, file, findutils, gawk, grep, gzip, make, patch, sed, tar, xz,
    binutils und GCC (jeweils Durchlauf 2), mit der Cross-Toolchain für das Zielsystem gebaut.
    Am Ende prüft das Skript, dass die Programme den Veyra-Programm-Interpreter nutzen.
-   Quellen ohne prüfbare Signatur (ncurses, file, xz) werden vor dem Festlegen gegen die
+   Quellen ohne prüfbare Signatur (file, xz) werden vor dem Festlegen gegen die
    MD5-Summen aus dem Buch Linux From Scratch 12.4 geprüft.
 4. Weitere Stufen (chroot-Bau, Image) folgen in Phase 4 und 5.
 

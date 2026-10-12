@@ -45,7 +45,7 @@ step "m4 $M4_VER"
 simple "m4-$M4_VER.tar.xz" "m4-$M4_VER"
 
 step "ncurses $NCURSES_VER"
-unpack "ncurses-$NCURSES_VER.tgz" "ncurses-$NCURSES_VER"
+unpack "ncurses-$NCURSES_VER.tar.gz" "ncurses-$NCURSES_VER"
 mkdir build
 pushd build >/dev/null
   ../configure --prefix="$VEYRA/tools" AWK=gawk

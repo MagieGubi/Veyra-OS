@@ -1,7 +1,7 @@
 # Quellen der temporaeren Werkzeuge (Stufe 3). Format: URL [SIGNATUR-URL | md5:SUMME]
 # binutils, GCC, GMP, MPFR, MPC kommen aus toolchain/sources.list.
 https://ftp.gnu.org/gnu/m4/m4-1.4.20.tar.xz https://ftp.gnu.org/gnu/m4/m4-1.4.20.tar.xz.sig
-https://invisible-mirror.net/archives/ncurses/current/ncurses-6.5-20250809.tgz md5:679987405412f970561cc85e1e6428a2
+https://ftp.gnu.org/gnu/ncurses/ncurses-6.5.tar.gz https://ftp.gnu.org/gnu/ncurses/ncurses-6.5.tar.gz.sig
 https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz.sig
 https://ftp.gnu.org/gnu/coreutils/coreutils-9.7.tar.xz https://ftp.gnu.org/gnu/coreutils/coreutils-9.7.tar.xz.sig
 https://ftp.gnu.org/gnu/diffutils/diffutils-3.12.tar.xz https://ftp.gnu.org/gnu/diffutils/diffutils-3.12.tar.xz.sig
