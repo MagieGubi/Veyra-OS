@@ -1,0 +1,13 @@
+# Kernel-Konfiguration
+
+Die Konfiguration entsteht reproduzierbar aus zwei Teilen:
+
+1. **Basis:** `make x86_64_defconfig` des gepinnten Linux-Quellbaums (Upstream-Standard).
+2. **Veyra-Fragmente:** `veyra-*.config` in diesem Verzeichnis, alphabetisch per
+   `scripts/kconfig/merge_config.sh` darübergelegt.
+
+Jede Zeile in einem Fragment hat einen Kommentar mit Begründung. Performance-Änderungen
+kommen erst mit Messung gegen diese Referenz (siehe docs/architecture.md).
+
+Core 0.1 zielt auf eine QEMU-VM (UEFI, virtio). Breite Hardwareunterstützung (AMD, NVIDIA,
+NVMe, USB, Audio) folgt in Phase 6.

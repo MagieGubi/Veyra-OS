@@ -1,0 +1,2 @@
+# SHA-256 der Kernel-Quelle (Format von sha256sum). Neue Versionen: fetch-sources.sh --lock
+# prueft die kernel.org-Signatur und ergaenzt den Wert; danach hier eintragen.

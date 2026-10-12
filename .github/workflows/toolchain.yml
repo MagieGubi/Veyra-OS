@@ -16,7 +16,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh tests/vpkg/run.sh
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh tests/vpkg/run.sh
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
 
@@ -62,6 +62,9 @@ jobs:
             out/build-cross.log
             out/SHA256SUMS
           retention-days: 14
+
+      - name: Gesperrte Quellen anzeigen
+        run: cat out/*sources.lock
 
   temptools:
     name: Temporaere Werkzeuge (Stufe 3)
@@ -112,3 +115,73 @@ jobs:
             out/build-temp.log
             out/SHA256SUMS
           retention-days: 14
+
+      - name: Gesperrte Quellen anzeigen
+        run: cat out/*sources.lock
+
+  kernel:
+    name: Veyra-Kernel (Phase 4, Build ${{ matrix.build }})
+    needs: toolchain
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      matrix:
+        build: [a, b]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fertigen Kernel aus dem Cache holen
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: kernel-${{ matrix.build }}-${{ hashFiles('toolchain/**', 'kernel/**', 'build/container/Dockerfile', 'build/scripts/ci-toolchain.sh', 'build/scripts/ci-kernel.sh') }}
+
+      - name: Toolchain aus Stufe 2 holen
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: toolchain-stage2
+          path: in
+
+      - name: Bootstrap-Container bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: docker build -t veyra-bootstrap build/container
+
+      - name: Kernel bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out
+          docker run --rm -v "$PWD:/repo:ro" -v "$PWD/in:/in:ro" -v "$PWD/out:/out" veyra-bootstrap /repo/build/scripts/ci-kernel.sh
+
+      - name: Ergebnis hochladen
+        run: sudo chown -R "$(id -u):$(id -g)" out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.build }}
+          path: out
+          retention-days: 14
+
+      - name: Pruefsummen und gesperrte Quellen anzeigen
+        run: cat out/kernel/SHA256SUMS out/kernel-sources.lock
+
+  kernel-reproducible:
+    name: Kernel reproduzierbar?
+    needs: kernel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-a
+          path: a
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-b
+          path: b
+      - name: Zwei unabhaengige Builds vergleichen
+        run: |
+          if diff -u a/kernel/modules.sha256 b/kernel/modules.sha256 && diff -u a/kernel/SHA256SUMS b/kernel/SHA256SUMS; then
+            echo "Bit-identisch:"; cat a/kernel/SHA256SUMS
+          else
+            echo "FEHLER: die beiden Kernel-Builds unterscheiden sich" >&2; exit 1
+          fi
