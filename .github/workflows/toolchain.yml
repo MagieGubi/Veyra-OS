@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh tests/vpkg/run.sh
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/run.sh
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: Rezepte und Quellenlisten pruefen
@@ -354,3 +354,55 @@ jobs:
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
+
+  image:
+    name: Abbild und Boot-Test in QEMU (Phase 5)
+    needs: [stage4b-2, kernel-reproducible]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Werkzeuge installieren und KVM freigeben
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd mtools dosfstools fdisk e2fsprogs qemu-system-x86 ovmf bc
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Basissystem holen
+        uses: actions/download-artifact@v4
+        with:
+          name: stage4b-2
+          path: sys
+      - name: Kernel holen
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-a
+          path: k
+
+      - name: veyra-release bauen
+        run: build/scripts/vpkg-build --srcdir "$PWD" --outdir extra packages/base/veyra-release
+
+      - name: Abbild bauen
+        run: |
+          sudo image/build-image.sh sys/veyra-stage4b-2.tar.zst k/kernel extra veyra-core-0.1.img
+          sudo chown "$(id -u):$(id -g)" veyra-core-0.1.img
+
+      - name: Boot-Test (UEFI, kein Bootloader)
+        run: image/boot-test.sh veyra-core-0.1.img boot.log 600
+
+      - name: Abbild packen
+        if: always()
+        run: |
+          if [ -f veyra-core-0.1.img ]; then zstd -q -T0 -10 veyra-core-0.1.img -o veyra-core-0.1.img.zst; sha256sum veyra-core-0.1.img* | tee SHA256SUMS; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veyra-core-0.1
+          path: |
+            veyra-core-0.1.img.zst
+            boot.log
+            SHA256SUMS
+          retention-days: 14
