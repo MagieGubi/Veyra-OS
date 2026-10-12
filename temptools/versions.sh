@@ -1,0 +1,17 @@
+# shellcheck shell=bash disable=SC2034
+# Gepinnte Versionen der temporaeren Werkzeuge (Stufe 3), aus Linux From Scratch 12.4.
+M4_VER=1.4.20
+NCURSES_VER=6.5-20250809
+BASH_VER=5.3
+COREUTILS_VER=9.7
+DIFFUTILS_VER=3.12
+FILE_VER=5.46
+FINDUTILS_VER=4.10.0
+GAWK_VER=5.3.2
+GREP_VER=3.12
+GZIP_VER=1.14
+MAKE_VER=4.4.1
+PATCH_VER=2.8
+SED_VER=4.9
+TAR_VER=1.35
+XZ_VER=5.8.1

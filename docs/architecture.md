@@ -21,7 +21,7 @@ Diese Datei hält die Entscheidungen fest, die für den Code in diesem Repositor
 1. **Host-Container** (`build/container/Dockerfile`): Debian, nur Werkzeuge zum Bootstrap.
 2. **Cross-Toolchain** (`toolchain/build-cross.sh`): binutils, GCC, Linux-Header, glibc,
    libstdc++ für `x86_64-veyra-linux-gnu`.
-3. **Temporäre Werkzeuge**: bash, coreutils, make usw. mit der Cross-Toolchain (folgt).
+3. **Temporäre Werkzeuge** (`temptools/build-temp.sh`): bash, coreutils, make usw. mit der Cross-Toolchain.
 4. **Bau im chroot**: endgültige Basispakete als `.vpkg` (folgt).
 5. **Image**: GPT-Platte, EFI-Partition mit Kernel, ext4-Root (folgt).
 

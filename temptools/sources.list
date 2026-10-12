@@ -1,0 +1,17 @@
+# Quellen der temporaeren Werkzeuge (Stufe 3). Format: URL [SIGNATUR-URL | md5:SUMME]
+# binutils, GCC, GMP, MPFR, MPC kommen aus toolchain/sources.list.
+https://ftp.gnu.org/gnu/m4/m4-1.4.20.tar.xz https://ftp.gnu.org/gnu/m4/m4-1.4.20.tar.xz.sig
+https://invisible-mirror.net/archives/ncurses/current/ncurses-6.5-20250809.tgz md5:679987405412f970561cc85e1e6428a2
+https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz.sig
+https://ftp.gnu.org/gnu/coreutils/coreutils-9.7.tar.xz https://ftp.gnu.org/gnu/coreutils/coreutils-9.7.tar.xz.sig
+https://ftp.gnu.org/gnu/diffutils/diffutils-3.12.tar.xz https://ftp.gnu.org/gnu/diffutils/diffutils-3.12.tar.xz.sig
+https://astron.com/pub/file/file-5.46.tar.gz md5:459da2d4b534801e2e2861611d823864
+https://ftp.gnu.org/gnu/findutils/findutils-4.10.0.tar.xz https://ftp.gnu.org/gnu/findutils/findutils-4.10.0.tar.xz.sig
+https://ftp.gnu.org/gnu/gawk/gawk-5.3.2.tar.xz https://ftp.gnu.org/gnu/gawk/gawk-5.3.2.tar.xz.sig
+https://ftp.gnu.org/gnu/grep/grep-3.12.tar.xz https://ftp.gnu.org/gnu/grep/grep-3.12.tar.xz.sig
+https://ftp.gnu.org/gnu/gzip/gzip-1.14.tar.xz https://ftp.gnu.org/gnu/gzip/gzip-1.14.tar.xz.sig
+https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz.sig
+https://ftp.gnu.org/gnu/patch/patch-2.8.tar.xz https://ftp.gnu.org/gnu/patch/patch-2.8.tar.xz.sig
+https://ftp.gnu.org/gnu/sed/sed-4.9.tar.xz https://ftp.gnu.org/gnu/sed/sed-4.9.tar.xz.sig
+https://ftp.gnu.org/gnu/tar/tar-1.35.tar.xz https://ftp.gnu.org/gnu/tar/tar-1.35.tar.xz.sig
+https://github.com/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.xz md5:cf5e1feb023d22c6bdaa30e84ef3abe3

@@ -16,7 +16,8 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Paketbauer `vpkg-build`, Prüfer `vpkg-verify` | `build/scripts/` | getestet (`tests/vpkg/run.sh`) |
 | Erstes Paket `veyra-release` | `packages/base/veyra-release/` | baut reproduzierbar |
 | Gepinnte Quellen mit Signaturprüfung | `toolchain/sources.list`, `toolchain/sources.lock`, `build/scripts/fetch-sources.sh` | im CI |
-| Cross-Toolchain (Stufe 2) | `toolchain/build-cross.sh`, Workflow `Toolchain` | im CI |
+| Cross-Toolchain (Stufe 2) | `toolchain/build-cross.sh`, Workflow `Toolchain` | im CI gebaut (GCC 15.2.0, glibc 2.42) |
+| Temporäre Werkzeuge (Stufe 3) | `temptools/build-temp.sh`, Workflow `Toolchain` | im CI |
 
 ## Bauen
 

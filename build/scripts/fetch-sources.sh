@@ -8,8 +8,11 @@
 # Mit --lock:  fehlende Eintraege werden nach erfolgreicher Signaturpruefung
 #              berechnet und in SOURCES.LOCK ergaenzt (nur fuer neue Quellen).
 #
-# Signaturen: GNU-Archive (.sig) gegen den GNU-Keyring, Kernel (.sign) gegen die
-# Schluessel von Linus Torvalds und Greg Kroah-Hartman (per WKD von kernel.org).
+# Zweites Feld je Zeile (Pruefung vor dem Festlegen):
+#   .sig-URL   GNU-Archive, gegen den GNU-Keyring
+#   .sign-URL  Kernel, gegen die Schluessel von Linus Torvalds und Greg Kroah-Hartman (WKD)
+#   md5:SUMME  Quellen ohne pruefbare Signatur: MD5 aus dem Buch Linux From Scratch 12.4
+#              als zweite, unabhaengige Quelle
 set -euo pipefail
 die() { echo "fetch-sources: $*" >&2; exit 1; }
 
@@ -47,6 +50,13 @@ grep -vE '^\s*(#|$)' "$list" | while read -r url sig; do
   fi
   [ $lock_mode = 1 ] || die "$file steht nicht in $lock (erst mit --lock festlegen)"
   [ -n "$sig" ] || die "$file hat keine Signatur; bitte SHA-256 von Hand pruefen und eintragen"
+  if [[ $sig == md5:* ]]; then
+    echo "${sig#md5:}  $dest/$file" | md5sum -c --quiet - || die "MD5 (LFS) passt nicht: $file"
+    sum=$(sha256sum "$dest/$file" | cut -d' ' -f1)
+    echo "$sum  $file" >> "$lock"
+    echo "   ok (MD5 aus LFS 12.4, neu festgelegt) $file $sum"
+    continue
+  fi
   setup_keys
   curl -fsSL --retry 3 -o "$dest/${sig##*/}" "$sig"
   case $sig in

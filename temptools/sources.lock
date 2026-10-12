@@ -1,0 +1,3 @@
+# SHA-256 der Quellen fuer Stufe 3 (Format von sha256sum).
+# Neue Quellen: fetch-sources.sh --lock prueft Signatur bzw. LFS-MD5 und ergaenzt den Wert;
+# danach wird er hier eingetragen.

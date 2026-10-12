@@ -15,9 +15,15 @@
 2. **Cross-Toolchain** (`toolchain/build-cross.sh`, als normaler Nutzer): Ergebnis in
    `/veyra/tools` und `/veyra/usr`. Das Skript prüft am Ende, dass Programme gegen die
    Veyra-glibc gelinkt werden (`/lib64/ld-linux-x86-64.so.2`) und C++ funktioniert.
-3. Weitere Stufen folgen in Phase 4 und 5.
+3. **Temporäre Werkzeuge** (`temptools/build-temp.sh`, als normaler Nutzer): m4, ncurses,
+   bash, coreutils, diffutils, file, findutils, gawk, grep, gzip, make, patch, sed, tar, xz,
+   binutils und GCC (jeweils Durchlauf 2), mit der Cross-Toolchain für das Zielsystem gebaut.
+   Am Ende prüft das Skript, dass die Programme den Veyra-Programm-Interpreter nutzen.
+   Quellen ohne prüfbare Signatur (ncurses, file, xz) werden vor dem Festlegen gegen die
+   MD5-Summen aus dem Buch Linux From Scratch 12.4 geprüft.
+4. Weitere Stufen (chroot-Bau, Image) folgen in Phase 4 und 5.
 
-Alles zusammen im Container: `build/scripts/ci-toolchain.sh` (so läuft es auch in GitHub Actions).
+Im Container: `build/scripts/ci-toolchain.sh` (Stufe 2) und `build/scripts/ci-temptools.sh` (Stufe 3); so läuft es auch in GitHub Actions.
 
 ## Gepinnte Versionen (Stufe 2)
 
