@@ -12,7 +12,7 @@ set -euo pipefail
 mkdir -p "$VEYRA"/{dev,proc,sys,run}
 cleanup() {
   for m in dev/shm dev/pts dev proc sys run; do
-    mountpoint -q "$VEYRA/$m" && umount -l "$VEYRA/$m" || true
+    if mountpoint -q "$VEYRA/$m"; then umount -l "$VEYRA/$m" || true; fi
   done
 }
 trap cleanup EXIT
