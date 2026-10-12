@@ -45,6 +45,8 @@ step "m4 $M4_VER"
 simple "m4-$M4_VER.tar.xz" "m4-$M4_VER"
 
 step "ncurses $NCURSES_VER"
+# Ohne C++-Bindung: ncurses 6.5 (Release) erkennt mit GCC 15 die Groesse von bool falsch,
+# die C++-Bindung bricht dann ab. Stufe 3 braucht sie nicht; das endgueltige ncurses kommt in Stufe 4.
 unpack "ncurses-$NCURSES_VER.tar.gz" "ncurses-$NCURSES_VER"
 mkdir build
 pushd build >/dev/null
@@ -55,7 +57,7 @@ pushd build >/dev/null
 popd >/dev/null
 ./configure --prefix=/usr --host="$VEYRA_TGT" --build="$(./config.guess)" \
   --mandir=/usr/share/man --with-manpage-format=normal --with-shared --without-normal \
-  --with-cxx-shared --without-debug --without-ada --disable-stripping AWK=gawk
+  --without-cxx-binding --without-debug --without-ada --disable-stripping AWK=gawk
 make
 make DESTDIR="$VEYRA" install
 ln -sf libncursesw.so "$VEYRA/usr/lib/libncurses.so"
