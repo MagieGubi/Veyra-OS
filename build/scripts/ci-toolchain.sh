@@ -8,8 +8,11 @@ cp "$repo/toolchain/sources.lock" /out/sources.lock
 echo "--- sources.lock nach dem Abruf ---"
 cat /out/sources.lock
 
+# Der Nutzer "veyra" darf das eingehaengte Repository evtl. nicht lesen: Kopie fuer ihn anlegen.
 install -d -o veyra -g veyra /veyra /work
-su veyra -c "VEYRA=/veyra SRC=/sources TMPDIR=/work JOBS=$(nproc) $repo/toolchain/build-cross.sh" 2>&1 \
+cp -r "$repo/toolchain" /work/toolchain
+chown -R veyra:veyra /work/toolchain /sources
+su veyra -c "VEYRA=/veyra SRC=/sources TMPDIR=/work JOBS=$(nproc) bash /work/toolchain/build-cross.sh" 2>&1 \
   | tee /out/build-cross.log
 
 tar --sort=name --numeric-owner --owner=0 --group=0 -C / -cf - veyra | zstd -q -T0 -19 -o /out/veyra-toolchain-stage2.tar.zst

@@ -1,3 +1,10 @@
 # SHA-256 aller Quellen (Format von sha256sum).
-# Leer = noch nicht festgelegt. Der erste CI-Lauf (fetch-sources.sh --lock) prueft die
-# GPG-Signaturen, berechnet die Werte und gibt sie aus; danach werden sie hier eingetragen.
+# Neue Quellen: fetch-sources.sh --lock prueft die GPG-Signatur und ergaenzt den Wert;
+# danach wird er hier eingetragen. Werte unten: GPG-geprueft im CI-Lauf vom 2026-10-12.
+c50c0e7f9cb188980e2cc97e4537626b1672441815587f1eab69d2a1bfbef5d2  binutils-2.45.tar.xz
+438fd996826b0c82485a29da03a72d71d6e3541a83ec702df4271f6fe025d24e  gcc-15.2.0.tar.xz
+d1775e32e4628e64ef930f435b67bb63af7599acb6be2b335b9f19f16509f17f  glibc-2.42.tar.xz
+a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898  gmp-6.3.0.tar.xz
+b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01  mpfr-4.2.2.tar.xz
+ab642492f5cf882b74aa0cb730cd410a81edcdbec895183ce930e706c1c759b8  mpc-1.3.1.tar.gz
+9106a4605da9e31ff17659d958782b815f9591ab308d03b0ee21aad6c7dced4b  linux-6.18.tar.xz
