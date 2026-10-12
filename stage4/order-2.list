@@ -1,0 +1,47 @@
+# Stufe 4b, Teil 2: restliches Basissystem bis systemd (Reihenfolge wie LFS 12.4, Kapitel 8).
+# Bewusst weggelassen (minimal by default): man-pages, Tcl/Expect/DejaGNU, inetutils,
+# XML::Parser/intltool, groff, GRUB (Core 0.1 bootet ohne Bootloader), libpipeline, man-db, vim.
+ncurses
+sed
+psmisc
+gettext
+bison
+grep
+bash
+libtool
+gdbm
+gperf
+expat
+less
+perl
+autoconf
+automake
+openssl
+elfutils
+libffi
+python
+flit-core
+packaging
+wheel
+setuptools
+ninja
+meson
+kmod
+coreutils
+diffutils
+gawk
+findutils
+gzip
+iproute2
+kbd
+make
+patch
+tar
+texinfo
+markupsafe
+jinja2
+systemd
+dbus
+procps-ng
+util-linux
+e2fsprogs

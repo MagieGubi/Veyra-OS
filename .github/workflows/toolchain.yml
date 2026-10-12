@@ -25,6 +25,12 @@ jobs:
         run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh tests/vpkg/run.sh
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
+      - name: Rezepte und Quellenlisten pruefen
+        run: |
+          for r in packages/*/*/recipe.sh; do bash -n "$r"; done
+          for o in stage4/order-*.list; do
+            build/scripts/gen-sources-list.sh "$o" packages/core stage4/lfs-12.4-md5sums > /dev/null
+          done
 
   toolchain:
     name: Cross-Toolchain (Stufe 2)
@@ -292,6 +298,58 @@ jobs:
             out/packages
             out/stage4-sources.lock
             out/build-stage4b-1.log
+          retention-days: 14
+
+      - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
+        run: cat out/packages/SHA256SUMS out/stage4-sources.lock
+
+  stage4b-2:
+    name: Basispakete Teil 2, ncurses bis systemd (Stufe 4b)
+    needs: stage4b-1
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fertigen Teil 2 aus dem Cache holen
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: stage4b-2-${{ hashFiles('toolchain/**', 'temptools/**', 'stage4/**', 'packages/core/**', 'build/container/Dockerfile', 'build/scripts/**') }}
+
+      - name: Teil 1 holen
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: stage4b-1
+          path: in
+
+      - name: Platz auf dem Runner schaffen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Bootstrap-Container bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: docker build -t veyra-bootstrap build/container
+
+      - name: Pakete bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out
+          rm -f in/SHA256SUMS
+          docker run --rm --privileged -v "$PWD:/repo:ro" -v "$PWD/in:/in:ro" -v "$PWD/out:/out" veyra-bootstrap /repo/build/scripts/ci-stage4b.sh 2
+
+      - name: Ergebnis hochladen
+        run: sudo chown -R "$(id -u):$(id -g)" out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage4b-2
+          path: |
+            out/veyra-stage4b-2.tar.zst
+            out/packages
+            out/stage4-sources.lock
+            out/build-stage4b-2.log
           retention-days: 14
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
