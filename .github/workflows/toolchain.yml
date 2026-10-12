@@ -1,0 +1,64 @@
+# Baut die Veyra-Cross-Toolchain (Stufe 2) und prueft VPKG.
+# Laeuft bei jedem Push auf main und per Knopfdruck unter "Actions".
+name: Toolchain
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  vpkg:
+    name: VPKG-Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Werkzeuge installieren
+        run: sudo apt-get update && sudo apt-get install -y zstd shellcheck
+      - name: shellcheck
+        run: shellcheck -x build/scripts/* toolchain/*.sh tests/vpkg/run.sh
+      - name: vpkg-build und vpkg-verify testen
+        run: bash tests/vpkg/run.sh
+
+  toolchain:
+    name: Cross-Toolchain (Stufe 2)
+    needs: vpkg
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fertige Toolchain aus dem Cache holen
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: toolchain-stage2-${{ hashFiles('toolchain/**', 'build/container/Dockerfile', 'build/scripts/ci-toolchain.sh', 'build/scripts/fetch-sources.sh') }}
+
+      - name: Platz auf dem Runner schaffen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Bootstrap-Container bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: docker build -t veyra-bootstrap build/container
+
+      - name: Cross-Toolchain bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out
+          docker run --rm -v "$PWD:/repo:ro" -v "$PWD/out:/out" veyra-bootstrap /repo/build/scripts/ci-toolchain.sh
+
+      - name: Pruefsummen
+        run: sudo chown -R "$(id -u):$(id -g)" out && cd out && sha256sum veyra-toolchain-stage2.tar.zst | tee SHA256SUMS
+
+      - name: Ergebnis hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-stage2
+          path: |
+            out/veyra-toolchain-stage2.tar.zst
+            out/sources.lock
+            out/build-cross.log
+            out/SHA256SUMS
+          retention-days: 14

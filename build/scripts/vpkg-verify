@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# vpkg-verify: prueft ein .vpkg-Paket.
+#
+# Aufruf:
+#   vpkg-verify [--pubkey PUB.pem] PAKET.vpkg
+#
+# Prueft (1) die Ed25519-Signatur PAKET.vpkg.sig, falls --pubkey angegeben ist,
+# und (2) jede Datei im Paket gegen die SHA-256-Werte im Manifest.
+# Exit-Code 0 = in Ordnung, sonst abgelehnt.
+set -euo pipefail
+
+die() { echo "vpkg-verify: ABGELEHNT: $*" >&2; exit 1; }
+
+pubkey=""
+if [ "${1:-}" = "--pubkey" ]; then pubkey=$2; shift 2; fi
+[ $# -eq 1 ] || { echo "Aufruf: vpkg-verify [--pubkey PUB.pem] PAKET.vpkg" >&2; exit 2; }
+pkg=$1
+[ -f "$pkg" ] || die "Datei fehlt: $pkg"
+
+if [ -n "$pubkey" ]; then
+  [ -f "$pkg.sig" ] || die "Signatur fehlt: $pkg.sig"
+  openssl pkeyutl -verify -pubin -inkey "$pubkey" -rawin -in "$pkg" -sigfile "$pkg.sig" >/dev/null 2>&1 \
+    || die "Signatur ungueltig"
+fi
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/vpkg-verify.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+zstd -q -dc "$pkg" | tar -xf - -C "$work" || die "Archiv beschaedigt"
+[ -f "$work/manifest.toml" ] || die "manifest.toml fehlt"
+
+# Dateiliste aus dem Manifest lesen (path + sha256 der Eintraege mit type = "file").
+python3 -I - "$work" <<'PY' || die "Dateien passen nicht zum Manifest"
+import hashlib, os, sys, tomllib
+root = sys.argv[1]
+with open(os.path.join(root, "manifest.toml"), "rb") as f:
+    m = tomllib.load(f)
+listed = set()
+bad = 0
+for e in m.get("file", []):
+    rel = e["path"].lstrip("/")
+    listed.add(rel)
+    p = os.path.join(root, "files", rel)
+    if e["type"] == "file":
+        h = hashlib.sha256(open(p, "rb").read()).hexdigest() if os.path.isfile(p) and not os.path.islink(p) else None
+        if h != e["sha256"]:
+            print(f"falscher Inhalt: /{rel}", file=sys.stderr); bad += 1
+    elif e["type"] == "symlink":
+        if not os.path.islink(p) or os.readlink(p) != e["target"]:
+            print(f"falscher Link: /{rel}", file=sys.stderr); bad += 1
+    elif not os.path.isdir(p) or os.path.islink(p):
+        print(f"fehlendes Verzeichnis: /{rel}", file=sys.stderr); bad += 1
+for d, dirs, files in os.walk(os.path.join(root, "files")):
+    for n in dirs + files:
+        rel = os.path.relpath(os.path.join(d, n), os.path.join(root, "files"))
+        if rel not in listed:
+            print(f"nicht im Manifest: /{rel}", file=sys.stderr); bad += 1
+sys.exit(1 if bad else 0)
+PY
+echo "vpkg-verify: OK: $pkg"

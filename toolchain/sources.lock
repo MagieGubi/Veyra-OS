@@ -1,0 +1,3 @@
+# SHA-256 aller Quellen (Format von sha256sum).
+# Leer = noch nicht festgelegt. Der erste CI-Lauf (fetch-sources.sh --lock) prueft die
+# GPG-Signaturen, berechnet die Werte und gibt sie aus; danach werden sie hier eingetragen.

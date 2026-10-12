@@ -1,0 +1,9 @@
+# Quellen der Cross-Toolchain. Format: URL [SIGNATUR-URL]
+# Jede Datei wird gegen sources.lock (SHA-256) geprueft; GNU-Archive zusaetzlich per GPG-Signatur.
+https://ftp.gnu.org/gnu/binutils/binutils-2.45.tar.xz https://ftp.gnu.org/gnu/binutils/binutils-2.45.tar.xz.sig
+https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz.sig
+https://ftp.gnu.org/gnu/glibc/glibc-2.42.tar.xz https://ftp.gnu.org/gnu/glibc/glibc-2.42.tar.xz.sig
+https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz.sig
+https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz.sig
+https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz.sig
+https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.tar.xz https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.tar.sign

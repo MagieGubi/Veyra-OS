@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# vpkg-build: baut ein Veyra-Paket (.vpkg) aus einem Rezept.
+#
+# Aufruf:
+#   vpkg-build [--srcdir DIR] [--outdir DIR] [--sign-key KEY.pem] REZEPT-VERZEICHNIS
+#
+# Das Rezept ist eine Datei recipe.sh (Format: docs/vpkg-format.md).
+# Quellen werden NICHT heruntergeladen; sie muessen bereits in --srcdir liegen
+# (siehe build/scripts/fetch-sources.sh) und werden hier per SHA-256 geprueft.
+#
+# Ergebnis: OUTDIR/NAME-VERSION-RELEASE-ARCH.vpkg (+ .sig, falls signiert)
+set -euo pipefail
+
+die() { echo "vpkg-build: $*" >&2; exit 1; }
+
+srcdir_cache=${VPKG_SRCDIR:-/sources}
+outdir=$PWD
+sign_key=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --srcdir) srcdir_cache=$2; shift 2 ;;
+    --outdir) outdir=$2; shift 2 ;;
+    --sign-key) sign_key=$2; shift 2 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -*) die "unbekannte Option: $1" ;;
+    *) break ;;
+  esac
+done
+[ $# -eq 1 ] || die "genau ein Rezept-Verzeichnis angeben"
+recipe_dir=$(cd "$1" && pwd)
+recipe=$recipe_dir/recipe.sh
+[ -f "$recipe" ] || die "kein recipe.sh in $recipe_dir"
+mkdir -p "$outdir"
+outdir=$(cd "$outdir" && pwd)
+
+for tool in tar zstd sha256sum find; do
+  command -v "$tool" >/dev/null || die "Werkzeug fehlt: $tool"
+done
+
+# Pflichtfelder und Standardwerte, dann das Rezept laden.
+pkgname="" pkgver="" pkgrel=1 pkgdesc="" license="" url="" arch=x86_64
+sources=() sha256sums=() depends=() makedepends=() conflicts=() provides=()
+build() { :; }
+package() { die "Rezept definiert keine package()-Funktion"; }
+# shellcheck source=/dev/null
+. "$recipe"
+
+for f in pkgname pkgver license; do
+  [ -n "${!f}" ] || die "Pflichtfeld $f fehlt im Rezept"
+done
+[[ $pkgname =~ ^[a-z0-9][a-z0-9+._-]*$ ]] || die "ungueltiger Paketname: $pkgname"
+[ "${#sources[@]}" -eq "${#sha256sums[@]}" ] || die "sources und sha256sums sind unterschiedlich lang"
+
+# Reproduzierbarkeit: fester Zeitstempel, feste Umgebung.
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}
+export LC_ALL=C TZ=UTC
+umask 022
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/vpkg-build.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+srcdir=$work/src
+pkgdir=$work/pkg
+mkdir -p "$srcdir" "$pkgdir"
+
+# Quellen pruefen und entpacken.
+for i in "${!sources[@]}"; do
+  file=${sources[$i]##*/}
+  path=$srcdir_cache/$file
+  [ -f "$recipe_dir/$file" ] && path=$recipe_dir/$file   # lokale Datei im Rezept
+  [ -f "$path" ] || die "Quelle fehlt: $file (erwartet in $srcdir_cache)"
+  echo "${sha256sums[$i]}  $path" | sha256sum -c --quiet - || die "SHA-256 passt nicht: $file"
+  case $file in
+    *.tar|*.tar.gz|*.tgz|*.tar.xz|*.tar.bz2|*.tar.zst) tar -xf "$path" -C "$srcdir" ;;
+    *) cp "$path" "$srcdir/" ;;
+  esac
+done
+
+export srcdir pkgdir pkgname pkgver pkgrel
+echo ">> Baue $pkgname $pkgver-$pkgrel"
+( cd "$srcdir" && build )
+( cd "$srcdir" && package )
+
+# Manifest erzeugen. Dateien sortiert, damit es bei gleichem Inhalt identisch ist.
+manifest=$work/manifest.toml
+q() { local s=${1//\\/\\\\}; printf '"%s"' "${s//\"/\\\"}"; }
+list() { local out="" x; for x in "$@"; do out+="${out:+, }$(q "$x")"; done; printf '[%s]' "$out"; }
+{
+  echo "format = 1"
+  echo "name = $(q "$pkgname")"
+  echo "version = $(q "$pkgver")"
+  echo "release = $pkgrel"
+  echo "arch = $(q "$arch")"
+  echo "description = $(q "$pkgdesc")"
+  echo "license = $(q "$license")"
+  echo "url = $(q "$url")"
+  echo "depends = $(list "${depends[@]}")"
+  echo "makedepends = $(list "${makedepends[@]}")"
+  echo "conflicts = $(list "${conflicts[@]}")"
+  echo "provides = $(list "${provides[@]}")"
+  echo "recipe_sha256 = $(q "$(sha256sum "$recipe" | cut -d' ' -f1)")"
+  echo "build_date = $SOURCE_DATE_EPOCH"
+  for i in "${!sources[@]}"; do
+    echo
+    echo "[[source]]"
+    echo "url = $(q "${sources[$i]}")"
+    echo "sha256 = $(q "${sha256sums[$i]}")"
+  done
+  (cd "$pkgdir" && find . -mindepth 1 | LC_ALL=C sort) | while IFS= read -r p; do
+    rel=${p#./}
+    echo
+    echo "[[file]]"
+    echo "path = $(q "/$rel")"
+    if [ -L "$pkgdir/$rel" ]; then
+      echo 'type = "symlink"'
+      echo "target = $(q "$(readlink "$pkgdir/$rel")")"
+    elif [ -d "$pkgdir/$rel" ]; then
+      echo 'type = "dir"'
+      echo "mode = \"$(stat -c %a "$pkgdir/$rel")\""
+    else
+      echo 'type = "file"'
+      echo "mode = \"$(stat -c %a "$pkgdir/$rel")\""
+      echo "sha256 = \"$(sha256sum "$pkgdir/$rel" | cut -d' ' -f1)\""
+    fi
+  done
+} > "$manifest"
+
+# Archiv: manifest.toml zuerst, dann files/. Feste Reihenfolge, Besitzer und Zeiten.
+mkdir "$work/root"
+mv "$manifest" "$work/root/manifest.toml"
+mv "$pkgdir" "$work/root/files"
+out=$outdir/$pkgname-$pkgver-$pkgrel-$arch.vpkg
+tar --sort=name --format=posix \
+    --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
+    --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+    -C "$work/root" -cf - manifest.toml files \
+  | zstd -q -19 -T1 -o "$out" -f
+
+if [ -n "$sign_key" ]; then
+  openssl pkeyutl -sign -inkey "$sign_key" -rawin -in "$out" -out "$out.sig"
+fi
+
+echo ">> $out"
+sha256sum "$out"
