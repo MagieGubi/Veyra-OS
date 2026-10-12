@@ -40,3 +40,27 @@ echo "ok 3 - manipuliertes Paket abgelehnt"
 
 if "$bin/vpkg-verify" --pubkey "$t/other-pub.pem" "$pkg" 2>/dev/null; then fail "falscher Schluessel angenommen"; fi
 echo "ok 4 - falscher Schluessel abgelehnt"
+
+# Unkomprimiert bauen und nachtraeglich komprimieren muss dieselbe Datei ergeben.
+"$bin/vpkg-build" --srcdir "$t" --outdir "$t/c" --no-compress "$r" >/dev/null
+zstd -q -19 -T1 -o "$t/c/recompressed.vpkg" < "$(ls "$t"/c/*.vpkg.tar)"
+[ "$(sha256sum "$t/c/recompressed.vpkg" | cut -d' ' -f1)" = "$b" ] || fail "--no-compress + zstd weicht ab"
+echo "ok 5 - --no-compress ergibt nach zstd dasselbe Paket"
+
+# Pruefsummen aus einer sources.lock: passende Quelle wird angenommen, veraenderte abgelehnt.
+mkdir -p "$t/lk/src" "$t/lk/rcp"
+echo "hallo" > "$t/lk/src/demo-1.txt"
+echo "$(sha256sum "$t/lk/src/demo-1.txt" | cut -d' ' -f1)  demo-1.txt" > "$t/lk/sources.lock"
+cat > "$t/lk/rcp/recipe.sh" <<'RCP'
+pkgname=demo pkgver=1 license=MIT
+sources=(https://example.org/demo-1.txt)
+sha256sums=()
+package() { install -Dm644 "$srcdir/demo-1.txt" "$pkgdir/usr/share/demo.txt"; }
+RCP
+"$bin/vpkg-build" --srcdir "$t/lk/src" --outdir "$t/lk/out" --lock "$t/lk/sources.lock" "$t/lk/rcp" >/dev/null \
+  || fail "Quelle mit passender Pruefsumme aus sources.lock abgelehnt"
+echo "boese" > "$t/lk/src/demo-1.txt"
+if "$bin/vpkg-build" --srcdir "$t/lk/src" --outdir "$t/lk/out2" --lock "$t/lk/sources.lock" "$t/lk/rcp" >/dev/null 2>&1; then
+  fail "veraenderte Quelle trotz sources.lock angenommen"
+fi
+echo "ok 6 - Pruefsummen aus sources.lock werden durchgesetzt"

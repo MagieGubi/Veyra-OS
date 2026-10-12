@@ -2,11 +2,15 @@
 # vpkg-build: baut ein Veyra-Paket (.vpkg) aus einem Rezept.
 #
 # Aufruf:
-#   vpkg-build [--srcdir DIR] [--outdir DIR] [--sign-key KEY.pem] REZEPT-VERZEICHNIS
+#   vpkg-build [--srcdir DIR] [--outdir DIR] [--sign-key KEY.pem] [--lock DATEI] [--no-compress]
+#              REZEPT-VERZEICHNIS
 #
 # Das Rezept ist eine Datei recipe.sh (Format: docs/vpkg-format.md).
 # Quellen werden NICHT heruntergeladen; sie muessen bereits in --srcdir liegen
 # (siehe build/scripts/fetch-sources.sh) und werden hier per SHA-256 geprueft.
+# --lock: ist sha256sums im Rezept leer, kommen die Werte aus dieser sources.lock.
+# --no-compress: schreibt das unkomprimierte tar (.vpkg.tar); fuer den Bau des Basissystems,
+#   bevor zstd dort existiert. "zstd -19 -T1" darauf ergibt genau die .vpkg-Datei.
 #
 # Ergebnis: OUTDIR/NAME-VERSION-RELEASE-ARCH.vpkg (+ .sig, falls signiert)
 set -euo pipefail
@@ -16,12 +20,16 @@ die() { echo "vpkg-build: $*" >&2; exit 1; }
 srcdir_cache=${VPKG_SRCDIR:-/sources}
 outdir=$PWD
 sign_key=""
+lock=""
+compress=1
 while [ $# -gt 0 ]; do
   case $1 in
     --srcdir) srcdir_cache=$2; shift 2 ;;
     --outdir) outdir=$2; shift 2 ;;
     --sign-key) sign_key=$2; shift 2 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --lock) lock=$2; shift 2 ;;
+    --no-compress) compress=0; shift ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     -*) die "unbekannte Option: $1" ;;
     *) break ;;
   esac
@@ -33,9 +41,11 @@ recipe=$recipe_dir/recipe.sh
 mkdir -p "$outdir"
 outdir=$(cd "$outdir" && pwd)
 
-for tool in tar zstd sha256sum find; do
+for tool in tar sha256sum find; do
   command -v "$tool" >/dev/null || die "Werkzeug fehlt: $tool"
 done
+[ $compress = 0 ] || command -v zstd >/dev/null || die "Werkzeug fehlt: zstd"
+[ $compress = 1 ] || [ -z "$sign_key" ] || die "--sign-key geht nur mit komprimiertem Paket"
 
 # Pflichtfelder und Standardwerte, dann das Rezept laden.
 pkgname="" pkgver="" pkgrel=1 pkgdesc="" license="" url="" arch=x86_64
@@ -49,6 +59,14 @@ for f in pkgname pkgver license; do
   [ -n "${!f}" ] || die "Pflichtfeld $f fehlt im Rezept"
 done
 [[ $pkgname =~ ^[a-z0-9][a-z0-9+._-]*$ ]] || die "ungueltiger Paketname: $pkgname"
+if [ "${#sha256sums[@]}" -eq 0 ] && [ -n "$lock" ]; then
+  for u in "${sources[@]}"; do
+    f=${u##*/}
+    sum=$(awk -v f="$f" '$2 == f {print $1}' "$lock")
+    [ -n "$sum" ] || die "$f steht nicht in $lock"
+    sha256sums+=("$sum")
+  done
+fi
 [ "${#sources[@]}" -eq "${#sha256sums[@]}" ] || die "sources und sha256sums sind unterschiedlich lang"
 
 # Reproduzierbarkeit: fester Zeitstempel, feste Umgebung.
@@ -129,11 +147,18 @@ mkdir "$work/root"
 mv "$manifest" "$work/root/manifest.toml"
 mv "$pkgdir" "$work/root/files"
 out=$outdir/$pkgname-$pkgver-$pkgrel-$arch.vpkg
-tar --sort=name --format=posix \
-    --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
-    --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
-    -C "$work/root" -cf - manifest.toml files \
-  | zstd -q -19 -T1 -o "$out" -f
+mktar() {
+  tar --sort=name --format=posix \
+      --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
+      --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+      -C "$work/root" -cf - manifest.toml files
+}
+if [ $compress = 1 ]; then
+  mktar | zstd -q -19 -T1 -o "$out" -f
+else
+  out=$out.tar
+  mktar > "$out"
+fi
 
 if [ -n "$sign_key" ]; then
   openssl pkeyutl -sign -inkey "$sign_key" -rawin -in "$out" -out "$out.sig"
