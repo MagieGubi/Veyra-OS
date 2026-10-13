@@ -132,7 +132,9 @@ static void attach_loop(const char *file, char *loopdev, size_t len)
 	struct loop_config cfg;
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.fd = (unsigned int)ffd;
-	cfg.info.lo_flags = LO_FLAGS_READ_ONLY | LO_FLAGS_AUTOCLEAR;
+	/* Kein AUTOCLEAR: das wuerde das Geraet beim close() unten wieder freigeben, noch
+	 * bevor mount() es benutzt. */
+	cfg.info.lo_flags = LO_FLAGS_READ_ONLY;
 	memcpy(cfg.info.lo_file_name, "root.sfs", sizeof("root.sfs"));
 	if (ioctl(lfd, LOOP_CONFIGURE, &cfg) != 0)
 		fatal("LOOP_CONFIGURE");
