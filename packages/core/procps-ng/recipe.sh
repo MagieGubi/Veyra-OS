@@ -9,7 +9,9 @@ depends=(glibc ncurses systemd)
 
 build() {
   cd "procps-ng-$pkgver"
-  ./configure --prefix=/usr --docdir=/usr/share/doc/procps-ng-$pkgver --disable-static --disable-kill --enable-watch8bit --with-systemd
+  # watch.c nutzt bool/false und verlaesst sich darauf, dass curses.h stdbool.h einbindet;
+  # das tut unser ncurses (ohne C++-Bindung gebaut) nicht. Daher explizit einbinden.
+  CPPFLAGS="-include stdbool.h" ./configure --prefix=/usr --docdir=/usr/share/doc/procps-ng-$pkgver --disable-static --disable-kill --enable-watch8bit --with-systemd
   make
 }
 
