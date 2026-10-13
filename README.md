@@ -20,8 +20,8 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Temporäre Werkzeuge (Stufe 3) | `temptools/build-temp.sh`, Workflow `Toolchain` | im CI gebaut |
 | Veyra-Kernel 6.18.56-veyra1 (Phase 4) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch (bzImage `7fac3305…`) |
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
-| Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | Teil 1 und 2 im CI gebaut, Teil 3 im CI |
-| Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | im CI |
+| Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
+| Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 8,1 s ab QEMU-Start mit KVM) |
 
 ## Bauen
 
