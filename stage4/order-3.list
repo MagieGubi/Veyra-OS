@@ -1,0 +1,6 @@
+# Stufe 4b, Teil 3: systemd und was darauf aufbaut (LFS 12.4, Kapitel 8).
+systemd
+dbus
+procps-ng
+util-linux
+e2fsprogs
