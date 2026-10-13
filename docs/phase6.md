@@ -121,7 +121,23 @@ Eintrag noch `/var/lib/vpkg/txn` existieren, und `vpkg check` muss fehlerfrei se
 
 ### Ergebnisse (CI)
 
-Wird nach dem CI-Lauf eingetragen.
+Erster Lauf (Commit 44fca39): rot. shellcheck bemängelte drei Testzeilen (`A && B || C`),
+danach lehnte die neue Manifestprüfung beim Bau des Abbilds das Paket `vpkg` selbst ab
+(siehe oben). Beides behoben.
+
+Lauf [38451902869](https://github.com/MagieGubi/Veyra-OS/actions/runs/38451902869)
+(Commit 0d6006a): **alle Jobs grün**. Kernel zweimal bit-identisch, 72 Pakete gebaut und
+signiert. Selbsttest im gebooteten System, beide Male mit `VEYRA-SELBSTTEST: OK`:
+
+| | Abbild (QEMU, virtuelle Festplatte) | Live-ISO (QEMU, virtuelle CD) |
+| --- | --- | --- |
+| vpkg check | 72 Pakete, 0 Fehler | 72 Pakete, 0 Fehler |
+| vpkg Abbruch und Rücknahme | ok | ok |
+| vpkg install / remove / Signaturprüfung | ok | ok |
+| systemd-Startzeit | 1,267 s Kernel + 1,431 s Userspace | 1,179 s Kernel + 1,441 s Userspace |
+| Arbeitsspeicher belegt | 86 MiB | 135 MiB |
+
+Das sind Messwerte aus einer virtuellen Maschine im CI, nicht von echter Hardware.
 
 ## Sicherheit
 
