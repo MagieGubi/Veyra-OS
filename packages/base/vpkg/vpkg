@@ -9,6 +9,7 @@
 #   vpkg [--root DIR] remove [--no-deps] NAME...
 #   vpkg [--root DIR] list | info NAME | files NAME | owner PFAD | check [NAME...]
 #   vpkg [--root DIR] register PAKET.vpkg...      (schon ausgepackte Pakete eintragen)
+#   vpkg [--root DIR] recover                      (unterbrochenen Vorgang zuruecknehmen)
 #   vpkg index VERZEICHNIS                         (index.toml fuer ein Paket-Repository)
 #
 # PAKET ist eine .vpkg-Datei oder ein Paketname aus dem Repository.
@@ -18,11 +19,15 @@
 # Signaturen: Liegen oeffentliche Schluessel in ROOT/etc/vpkg/keys/*.pem (oder wird
 # --pubkey angegeben), muss jedes Paket eine gueltige Ed25519-Signatur PAKET.vpkg.sig haben.
 #
-# Grenzen von 0.1: Vorgaenge sind nicht atomar. Bricht eine Installation mitten ab, kann
-# ein halbfertiger Zustand bleiben; "vpkg check" zeigt ihn an.
+# Transaktionen (ab 0.2): install, upgrade, remove und register schreiben jede Aenderung
+# erst in ein Journal (ROOT/var/lib/vpkg/txn) und sichern ersetzte oder geloeschte Dateien.
+# Scheitert ein Schritt, wird alles zurueckgenommen; bricht vpkg ab (Absturz, Stromausfall),
+# nimmt der naechste schreibende Aufruf den halben Vorgang zurueck. Install-Skripte laufen
+# erst danach und lassen sich nicht zuruecknehmen.
 import argparse
 import fcntl
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -33,8 +38,11 @@ import tomllib
 import urllib.parse
 import urllib.request
 
-VERSION = "0.1"
+VERSION = "0.2"
 DB = "var/lib/vpkg"
+TXN = DB + "/txn"
+MODE_RE = re.compile(r"^[0-7]{1,4}$")
+SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 KEYS = "etc/vpkg/keys"
 REPO_FILE = "etc/vpkg/repo"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9+._-]*$")
@@ -139,7 +147,50 @@ class Paket:
                 return
         raise Fehler(f"{self.path}: Signatur ungueltig")
 
+    def verify_manifest(self):
+        """Prueft Aufbau und Werte des Manifests, bevor irgendetwas davon benutzt wird."""
+        m = self.m
+        for k in ("version", "release"):
+            if not isinstance(m.get(k), (str, int)) or str(m[k]) == "":
+                raise Fehler(f"{self.path}: Manifest ohne gueltige Angabe '{k}'")
+        for k in ("depends", "provides", "conflicts"):
+            v = m.get(k, [])
+            if not isinstance(v, list) or not all(isinstance(x, str) and NAME_RE.match(x) for x in v):
+                raise Fehler(f"{self.path}: Manifest: ungueltige Liste '{k}'")
+        entries = m.get("file", [])
+        if not isinstance(entries, list):
+            raise Fehler(f"{self.path}: Manifest: 'file' ist keine Liste")
+        seen = {}
+        for e in entries:
+            if not isinstance(e, dict) or not isinstance(e.get("path"), str):
+                raise Fehler(f"{self.path}: Manifest: Dateieintrag ohne Pfad")
+            rel = safe_rel(e["path"])
+            if rel in seen:
+                raise Fehler(f"{self.path}: /{rel} steht doppelt im Manifest")
+            if rel == DB or rel.startswith(DB + "/"):
+                raise Fehler(f"{self.path}: /{rel} liegt in der Paketdatenbank von VPKG")
+            t = e.get("type")
+            if t not in ("file", "dir", "symlink"):
+                raise Fehler(f"{self.path}: /{rel}: unbekannter Typ {t!r}")
+            if t in ("file", "dir") and not (isinstance(e.get("mode"), str) and MODE_RE.match(e["mode"])):
+                raise Fehler(f"{self.path}: /{rel}: ungueltige Rechte {e.get('mode')!r}")
+            if t == "file" and not (isinstance(e.get("sha256"), str) and SHA_RE.match(e["sha256"])):
+                raise Fehler(f"{self.path}: /{rel}: ungueltige Pruefsumme")
+            if t == "symlink" and not (isinstance(e.get("target"), str) and e["target"]
+                                       and "\0" not in e["target"]):
+                raise Fehler(f"{self.path}: /{rel}: Link ohne gueltiges Ziel")
+            seen[rel] = t
+        # Unter einer Datei oder einem Link kann nichts liegen (sonst wuerde ein Link aus dem
+        # Paket als Weg in fremde Verzeichnisse dienen).
+        for rel in seen:
+            parent = os.path.dirname(rel)
+            while parent:
+                if seen.get(parent, "dir") != "dir":
+                    raise Fehler(f"{self.path}: /{rel} liegt unter /{parent}, das kein Verzeichnis ist")
+                parent = os.path.dirname(parent)
+
     def verify_content(self):
+        self.verify_manifest()
         files = os.path.join(self.dir, "files")
         listed = set()
         for e in self.m.get("file", []):
@@ -178,8 +229,8 @@ def sh(s):
 def safe_rel(path):
     rel = path.lstrip("/")
     parts = rel.split("/")
-    if not rel or any(p in ("", ".", "..") for p in parts):
-        raise Fehler(f"unsicherer Pfad im Paket: {path}")
+    if not rel or "\0" in rel or any(p in ("", ".", "..") for p in parts):
+        raise Fehler(f"unsicherer Pfad im Paket: {path!r}")
     return rel
 
 
@@ -203,6 +254,7 @@ class System:
             fcntl.flock(self.lockfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise Fehler("ein anderer vpkg-Vorgang laeuft gerade")
+        Txn(self).recover()
 
     @property
     def installed(self):
@@ -237,20 +289,18 @@ class System:
                     own.setdefault(e["path"].lstrip("/"), set()).add(n)
         return own
 
-    def write_entry(self, pkg):
-        d = os.path.join(self.db, pkg.name)
-        tmp = d + ".neu"
-        shutil.rmtree(tmp, ignore_errors=True)
+    def write_entry(self, pkg, txn):
+        # Vorbereitet im Transaktionsverzeichnis: bei Abbruch raeumt rollback() es mit weg.
+        tmp = os.path.join(txn.dir, f"neu-{pkg.name}")
         os.makedirs(tmp)
         shutil.copy(os.path.join(pkg.dir, "manifest.toml"), tmp)
         if os.path.isfile(os.path.join(pkg.dir, "install")):
             shutil.copy(os.path.join(pkg.dir, "install"), tmp)
-        shutil.rmtree(d, ignore_errors=True)
-        os.rename(tmp, d)
+        txn.db_put(pkg.name, tmp)
         self.installed[pkg.name] = pkg.m
 
-    def drop_entry(self, name):
-        shutil.rmtree(os.path.join(self.db, name), ignore_errors=True)
+    def drop_entry(self, name, txn):
+        txn.db_put(name, None)
         self.installed.pop(name, None)
 
     def path(self, rel):
@@ -273,6 +323,194 @@ class System:
         r = subprocess.run(cmd, env=env)
         if r.returncode != 0:
             raise Fehler(f"{what} fehlgeschlagen (Rueckgabewert {r.returncode})")
+
+
+# ---------------------------------------------------------------- Transaktionen
+
+class Txn:
+    """Journal fuer einen schreibenden Vorgang. Jede Aenderung wird vor der Ausfuehrung
+    protokolliert (Zeile fuer Zeile, mit fsync); ersetzte und geloeschte Dateien bleiben bis
+    zum Abschluss als Sicherung erhalten. rollback() nimmt alles in umgekehrter Reihenfolge
+    zurueck, auch nach einem Absturz (recover())."""
+
+    def __init__(self, system):
+        self.s = system
+        self.dir = system.path(TXN)
+        self.journal = os.path.join(self.dir, "journal")
+        self.f = None
+        self.n = 0
+        # Nur fuer Tests: "fehler:N" laesst die (N+1)-te Aenderung scheitern,
+        # "absturz:N" beendet vpkg dort sofort (wie ein Stromausfall).
+        self.test = os.environ.get("VPKG_TEST_ABBRUCH", "")
+
+    # -- Ablauf
+
+    def begin(self):
+        if os.path.lexists(self.dir):
+            raise Fehler(f"/{TXN} existiert noch (unterbrochener Vorgang?)")
+        os.makedirs(os.path.join(self.dir, "sicherung"))
+        self.f = open(self.journal, "x", encoding="utf-8")
+        self._sync_dir(self.dir)
+        return self
+
+    def commit(self):
+        self.f.close()
+        os.unlink(self.journal)          # ab hier gilt der Vorgang als abgeschlossen
+        self._sync_dir(self.dir)
+        shutil.rmtree(self.dir)
+
+    def rollback(self):
+        if self.f:
+            self.f.close()
+            self.f = None
+        recs = []
+        with open(self.journal, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    recs.append(json.loads(line))
+                except ValueError:
+                    break                # unvollstaendige letzte Zeile (Abbruch beim Schreiben)
+        problems = []
+        for r in reversed(recs):
+            try:
+                self._undo(r)
+            except OSError as e:
+                problems.append(f"{r.get('op')} /{r.get('path', r.get('name', ''))}: {e}")
+        self.s._installed = None
+        if problems:
+            raise Fehler("Zuruecknehmen unvollstaendig, Journal bleibt in /" + TXN + ":\n  "
+                         + "\n  ".join(problems))
+        shutil.rmtree(self.dir)
+        return len(recs)
+
+    def recover(self):
+        if os.path.isfile(self.journal):
+            warn(f"unterbrochener Vorgang in /{TXN} gefunden, wird zurueckgenommen")
+            n = self.rollback()
+            warn(f"{n} Aenderung(en) zurueckgenommen")
+        elif os.path.lexists(self.dir):
+            shutil.rmtree(self.dir)      # Abbruch nach dem Abschluss: nur Sicherungen uebrig
+
+    # -- Aenderungen (jeweils erst protokollieren, dann ausfuehren)
+
+    def put_file(self, rel, write_tmp):
+        """Legt /rel an oder ersetzt es; write_tmp(tmp) erzeugt den neuen Inhalt."""
+        dst = self.s.path(rel)
+        tmp = os.path.join(os.path.dirname(dst), f".vpkg-{os.getpid()}-{os.path.basename(dst)}")
+        rec = {"op": "put", "path": rel, "tmp": tmp, "backup": None}
+        if os.path.lexists(dst):
+            rec["backup"] = self._backup(dst)
+        self._log(rec)
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        write_tmp(tmp)
+        os.replace(tmp, dst)
+
+    def mkdir(self, rel, mode):
+        dst = self.s.path(rel)
+        self._log({"op": "mkdir", "path": rel})
+        os.mkdir(dst)
+        os.chmod(dst, mode)
+
+    def unlink(self, rel):
+        dst = self.s.path(rel)
+        self._log({"op": "unlink", "path": rel, "backup": self._backup(dst)})
+        os.unlink(dst)
+
+    def rename(self, rel, new_rel):
+        self._log({"op": "rename", "path": rel, "to": new_rel})
+        os.replace(self.s.path(rel), self.s.path(new_rel))
+
+    def rmdir(self, rel):
+        dst = self.s.path(rel)
+        mode = os.stat(dst).st_mode & 0o7777
+        self._log({"op": "rmdir", "path": rel, "mode": mode})
+        os.rmdir(dst)
+
+    def db_put(self, name, newdir):
+        """Ersetzt (newdir) oder entfernt (None) den Datenbankeintrag eines Pakets."""
+        d = os.path.join(self.s.db, name)
+        rec = {"op": "db", "name": name, "backup": None}
+        if os.path.lexists(d):
+            rec["backup"] = os.path.join(self.dir, "sicherung", f"db-{name}")
+        self._log(rec)
+        if rec["backup"]:
+            os.rename(d, rec["backup"])
+        if newdir:
+            os.rename(newdir, d)
+
+    # -- intern
+
+    def _log(self, rec):
+        if self.test:
+            art, _, n = self.test.partition(":")
+            if self.n == int(n):
+                if art == "absturz":
+                    os._exit(70)
+                raise OSError(5, f"Testabbruch nach {self.n} Aenderung(en)")
+        self.n += 1
+        self.f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self.f.flush()
+        os.fsync(self.f.fileno())
+
+    def _backup(self, dst):
+        """Sichert eine Datei oder einen Link (fester Link, sonst Kopie) und liefert den Pfad."""
+        b = os.path.join(self.dir, "sicherung", str(self.n))
+        try:
+            os.link(dst, b, follow_symlinks=False)
+        except OSError:
+            if os.path.islink(dst):
+                os.symlink(os.readlink(dst), b)
+            else:
+                shutil.copy2(dst, b)
+                st = os.stat(dst)
+                if os.geteuid() == 0:
+                    os.chown(b, st.st_uid, st.st_gid)
+                os.chmod(b, st.st_mode & 0o7777)
+        return b
+
+    def _undo(self, r):
+        op = r["op"]
+        if op == "db":
+            d = os.path.join(self.s.db, r["name"])
+            if r["backup"] and os.path.lexists(r["backup"]):
+                if os.path.lexists(d):
+                    shutil.rmtree(d)
+                os.rename(r["backup"], d)
+            elif not r["backup"] and os.path.lexists(d):
+                shutil.rmtree(d)
+            return
+        dst = self.s.path(r["path"])
+        if op == "put":
+            if os.path.lexists(r["tmp"]):
+                os.unlink(r["tmp"])
+            if r["backup"]:
+                if os.path.lexists(r["backup"]):
+                    os.replace(r["backup"], dst)
+            elif os.path.lexists(dst) and not os.path.isdir(dst):
+                os.unlink(dst)
+        elif op == "mkdir":
+            if os.path.isdir(dst) and not os.path.islink(dst):
+                os.rmdir(dst)
+        elif op == "unlink":
+            if not os.path.lexists(dst) and os.path.lexists(r["backup"]):
+                os.replace(r["backup"], dst)
+        elif op == "rename":
+            to = self.s.path(r["to"])
+            if not os.path.lexists(dst) and os.path.lexists(to):
+                os.replace(to, dst)
+        elif op == "rmdir":
+            if not os.path.lexists(dst):
+                os.mkdir(dst)
+                os.chmod(dst, r["mode"])
+
+    @staticmethod
+    def _sync_dir(d):
+        fd = os.open(d, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def provides_map(pkgs):
@@ -473,7 +711,7 @@ def is_config(rel):
     return rel.startswith("etc/")
 
 
-def place(system, pkg):
+def place(system, pkg, txn):
     """Kopiert die Dateien eines Pakets ins System; liefert die Pfade der alten Version,
     die in der neuen fehlen."""
     old = system.installed.get(pkg.name)
@@ -489,8 +727,7 @@ def place(system, pkg):
         t = e["type"]
         if t == "dir":
             if not os.path.lexists(dst):
-                os.mkdir(dst)
-                os.chmod(dst, int(e["mode"], 8))
+                txn.mkdir(rel, int(e["mode"], 8))
             continue
         src = os.path.join(src_root, rel)
         if t == "file" and is_config(rel) and os.path.isfile(dst) and not os.path.islink(dst):
@@ -498,23 +735,24 @@ def place(system, pkg):
             prev = old_files.get(rel, {}).get("sha256")
             if cur != e["sha256"] and prev is not None and cur != prev:
                 # Vom Nutzer geaenderte Konfiguration bleibt; die neue kommt daneben.
-                shutil.copyfile(src, dst + ".vpkgnew")
-                os.chmod(dst + ".vpkgnew", int(e["mode"], 8))
+                txn.put_file(rel + ".vpkgnew", copier(src, int(e["mode"], 8)))
                 warn(f"/{rel} wurde geaendert und bleibt; neue Fassung: /{rel}.vpkgnew")
                 continue
-        tmp = os.path.join(os.path.dirname(dst), f".vpkg-{os.getpid()}-{os.path.basename(dst)}")
-        if os.path.lexists(tmp):
-            os.unlink(tmp)
         if t == "file":
-            shutil.copyfile(src, tmp)
-            os.chmod(tmp, int(e["mode"], 8))
+            txn.put_file(rel, copier(src, int(e["mode"], 8)))
         else:
-            os.symlink(e["target"], tmp)
-        os.replace(tmp, dst)
+            txn.put_file(rel, lambda tmp, target=e["target"]: os.symlink(target, tmp))
     return [p for p, e in old_files.items() if p not in new_paths]
 
 
-def remove_paths(system, name, paths, keep_owned_by_others=True):
+def copier(src, mode):
+    def write(tmp):
+        shutil.copyfile(src, tmp)
+        os.chmod(tmp, mode)
+    return write
+
+
+def remove_paths(system, name, paths, txn, keep_owned_by_others=True):
     """Entfernt Dateien/Links; leere Verzeichnisse danach nur, wenn sie niemand sonst nutzt."""
     owners = system.owners(exclude={name})
     downers = system.dir_owners(exclude={name})
@@ -534,21 +772,19 @@ def remove_paths(system, name, paths, keep_owned_by_others=True):
             continue
         if e["type"] == "file" and is_config(rel) and not os.path.islink(dst) \
                 and os.path.isfile(dst) and sha256_file(dst) != e["sha256"]:
-            os.replace(dst, dst + ".vpkgsave")
+            txn.rename(rel, rel + ".vpkgsave")
             warn(f"/{rel} war geaendert und bleibt als /{rel}.vpkgsave")
             continue
         if os.path.isdir(dst) and not os.path.islink(dst):
             continue
-        os.unlink(dst)
+        txn.unlink(rel)
     for rel in sorted(dirs, reverse=True):
         if rel in downers:
             continue
         dst = system.path(rel)
-        if os.path.isdir(dst) and not os.path.islink(dst):
-            try:
-                os.rmdir(dst)
-            except OSError:
-                pass  # nicht leer: enthaelt fremde oder neue Dateien
+        # Nur leere Verzeichnisse; eines mit fremden oder neuen Dateien bleibt.
+        if os.path.isdir(dst) and not os.path.islink(dst) and not os.listdir(dst):
+            txn.rmdir(rel)
 
 
 def ldconfig(system):
@@ -583,25 +819,48 @@ def cmd_install(args, system, upgrade_only=False):
                 return 0
         pkgs = resolve(system, wanted, repo, tmp, args.no_deps)
         file_conflicts(system, pkgs, args.overwrite)
-        for p in pkgs:
-            old = system.installed.get(p.name)
-            if old is None:
-                what = f"installiere {p.name} {fullver(p.m)}"
-            else:
-                c = vercmp(fullver(p.m), fullver(old))
-                what = {1: "aktualisiere", 0: "installiere neu", -1: "stufe zurueck"}[c]
-                what = f"{what} {p.name} {fullver(old)} -> {fullver(p.m)}"
-            info(f">> {what}")
-            stale = place(system, p)
-            if old is not None:
-                remove_paths(system, p.name, stale)
-            system.write_entry(p)
+
+        def apply(txn):
+            for p in pkgs:
+                old = system.installed.get(p.name)
+                if old is None:
+                    what = f"installiere {p.name} {fullver(p.m)}"
+                else:
+                    c = vercmp(fullver(p.m), fullver(old))
+                    what = {1: "aktualisiere", 0: "installiere neu", -1: "stufe zurueck"}[c]
+                    what = f"{what} {p.name} {fullver(old)} -> {fullver(p.m)}"
+                info(f">> {what}")
+                stale = place(system, p, txn)
+                if old is not None:
+                    remove_paths(system, p.name, stale, txn)
+                system.write_entry(p, txn)
+        transaction(system, "Installation", apply)
         ldconfig(system)
         if not args.no_scripts:
             for p in pkgs:
-                run_install_script(system, p.name)
+                try:
+                    run_install_script(system, p.name)
+                except Fehler as e:
+                    raise Fehler(f"{e}\nDie Pakete sind installiert; das Install-Skript laesst sich "
+                                 "nicht zuruecknehmen (erneut ausfuehren: vpkg install PAKET)")
         info(f"Fertig: {len(pkgs)} Paket(e).")
     return 0
+
+
+def transaction(system, what, apply):
+    """Fuehrt apply(txn) als Ganzes aus: bei jedem Fehler wird alles zurueckgenommen."""
+    txn = Txn(system).begin()
+    try:
+        apply(txn)
+    except BaseException as e:
+        grund = e if isinstance(e, (Fehler, OSError)) else type(e).__name__
+        try:
+            n = txn.rollback()
+        except Fehler as r:
+            raise Fehler(f"{what} abgebrochen ({grund}).\n{r}") from e
+        raise Fehler(f"{what} abgebrochen ({grund}); {n} Aenderung(en) zurueckgenommen, "
+                     "das System ist unveraendert") from e
+    txn.commit()
 
 
 # ---------------------------------------------------------------- Entfernen
@@ -624,11 +883,13 @@ def cmd_remove(args, system):
         if needed:
             raise Fehler("wird noch gebraucht:\n  " + "\n  ".join(sorted(needed))
                          + "\n(--no-deps entfernt trotzdem)")
-    for n in names:
-        info(f">> entferne {n} {fullver(system.installed[n])}")
-        paths = [e["path"].lstrip("/") for e in system.installed[n].get("file", [])]
-        remove_paths(system, n, paths)
-        system.drop_entry(n)
+    def apply(txn):
+        for n in names:
+            info(f">> entferne {n} {fullver(system.installed[n])}")
+            paths = [e["path"].lstrip("/") for e in system.installed[n].get("file", [])]
+            remove_paths(system, n, paths, txn)
+            system.drop_entry(n, txn)
+    transaction(system, "Entfernen", apply)
     ldconfig(system)
     info(f"Fertig: {len(names)} Paket(e) entfernt.")
     return 0
@@ -708,6 +969,9 @@ def check_package(system, name, m):
 def cmd_check(args, system):
     names = args.names or list(system.installed)
     errs, conf = [], []
+    if os.path.isfile(system.path(TXN + "/journal")):
+        errs.append(f"unterbrochener Vorgang in /{TXN}: der naechste schreibende vpkg-Aufruf "
+                    "(z. B. als root: vpkg recover) nimmt ihn zurueck")
     for n in names:
         e, c = check_package(system, n, need(system, n))
         errs += e
@@ -739,16 +1003,19 @@ def cmd_register(args, system):
     system.lock()
     total = 0
     with tempfile.TemporaryDirectory(prefix="vpkg.") as tmp:
-        for path in args.packages:
-            p = Paket(os.path.abspath(path), tmp, system.keys)
-            errs, conf = check_package(system, p.name, p.m)
-            for e in errs:
-                warn(e)
-            total += len(errs)
-            system.write_entry(p)
-            shutil.rmtree(p.dir)
-            info(f"eingetragen: {p.name} {fullver(p.m)}"
-                 + (f" ({len(errs)} Abweichungen)" if errs else ""))
+        def apply(txn):
+            nonlocal total
+            for path in args.packages:
+                p = Paket(os.path.abspath(path), tmp, system.keys)
+                errs, conf = check_package(system, p.name, p.m)
+                for e in errs:
+                    warn(e)
+                total += len(errs)
+                system.write_entry(p, txn)
+                shutil.rmtree(p.dir)
+                info(f"eingetragen: {p.name} {fullver(p.m)}"
+                     + (f" ({len(errs)} Abweichungen)" if errs else ""))
+        transaction(system, "Eintragen", apply)
     info(f"Fertig: {len(args.packages)} Paket(e) eingetragen, {total} Abweichungen.")
     return 1 if total and args.strict else 0
 
@@ -788,6 +1055,7 @@ def main(argv=None):
     p = sub.add_parser("register", help="schon ausgepackte Pakete eintragen")
     p.add_argument("--strict", action="store_true", help="Abweichungen als Fehler werten")
     p.add_argument("packages", nargs="+")
+    sub.add_parser("recover", help="unterbrochenen Vorgang zuruecknehmen")
     p = sub.add_parser("index", help="index.toml fuer ein Repository-Verzeichnis schreiben")
     p.add_argument("dir")
     args = ap.parse_args(argv)
@@ -802,9 +1070,16 @@ def main(argv=None):
         if args.cmd == "upgrade":
             args.packages = []
             return cmd_install(args, system, upgrade_only=True)
+        if args.cmd == "recover":
+            system.lock()            # nimmt einen unterbrochenen Vorgang zurueck
+            info("Kein unterbrochener Vorgang (mehr) vorhanden.")
+            return 0
         return {"remove": cmd_remove, "list": cmd_list, "info": cmd_info, "files": cmd_files,
                 "owner": cmd_owner, "check": cmd_check, "register": cmd_register}[args.cmd](args, system)
     except Fehler as e:
+        print(f"vpkg: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
         print(f"vpkg: {e}", file=sys.stderr)
         return 1
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests fuer VPKG 0.1 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
+# Tests fuer VPKG 0.2 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
 # Braucht python3 (3.11+), zstd, openssl. Laeuft ohne root-Rechte.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -164,4 +164,111 @@ vpkg install "$P/geheim-1-1-x86_64.vpkg" >/dev/null || fail "Installation mit Mo
 [ "$(stat -c %a "$root/usr/libexec/helfer")" = 4710 ] || fail "Modus 4710 nicht uebernommen"
 ok "Dateien mit eingeschraenkten Rechten (4710) lassen sich pruefen und installieren"
 
-echo "Alle $n VPKG-0.1-Tests bestanden."
+# ---- Transaktionen (VPKG 0.2): ein abgebrochener Vorgang hinterlaesst das System unveraendert.
+tx=$t/tx
+mkdir -p "$tx"
+vx() { python3 "$here/packages/base/vpkg/vpkg" --root "$tx" "$@"; }
+# zustand: Dateibaum (Typ, Rechte, Inhalt) ohne die Paketdatenbank-Sicherungen + list
+zustand() {
+  (cd "$tx" && find . -path ./var/lib/vpkg/txn -prune -o -printf '%y %m %p\n' | sort
+   find . -type f -not -path './var/lib/vpkg/txn/*' -exec sha256sum {} + | sort)
+  vx list
+}
+sauber() {
+  [ ! -e "$tx/var/lib/vpkg/txn" ] || fail "$1: /var/lib/vpkg/txn ist liegen geblieben"
+  [ -z "$(find "$tx" -name '.vpkg-*')" ] || fail "$1: temporaere Dateien liegen geblieben"
+  vx check >/dev/null || fail "$1: check meldet Fehler"
+}
+vx install "$P/app-1.0-1-x86_64.vpkg" "$P/liba-1.0-1-x86_64.vpkg" >/dev/null
+echo lokal > "$tx/etc/app.conf"
+vorher=$(zustand)
+for k in 0 1 2 3 4 5 6 7 8; do
+  if VPKG_TEST_ABBRUCH=fehler:$k vx install "$P/app-2.0-1-x86_64.vpkg" >"$t/out" 2>&1; then
+    [ "$k" -gt 0 ] || fail "Update trotz Abbruch bei der 1. Aenderung erfolgreich"
+    break   # alle Aenderungen dieses Updates liegen vor k
+  fi
+  grep -q 'abgebrochen.*das System ist unveraendert' "$t/out" || fail "Meldung nach Abbruch $k: $(cat "$t/out")"
+  ! grep -q Traceback "$t/out" || fail "Python-Traceback nach Abbruch $k"
+  diff <(echo "$vorher") <(zustand) >&2 || fail "Update mit Abbruch nach $k Aenderung(en) hat das System veraendert"
+  sauber "Update mit Abbruch $k"
+done
+[ "$k" -gt 3 ] || fail "Update hatte zu wenige Aenderungen ($k), Test greift nicht"
+vx remove app >/dev/null 2>&1 || true
+vx install "$P/app-1.0-1-x86_64.vpkg" >/dev/null
+ok "Abbruch an jeder Stelle eines Updates nimmt alles zurueck (Dateien, Konfiguration, Datenbank)"
+
+vorher=$(zustand)
+for k in 0 1 2 3 4; do
+  if VPKG_TEST_ABBRUCH=fehler:$k vx remove app >"$t/out" 2>&1; then
+    fail "Entfernen trotz Abbruch nach $k Aenderung(en) erfolgreich"
+  fi
+  [ "$(zustand)" = "$vorher" ] || fail "Entfernen mit Abbruch nach $k Aenderung(en) hat das System veraendert"
+  sauber "Entfernen mit Abbruch $k"
+done
+ok "Abbruch beim Entfernen nimmt alles zurueck"
+
+vorher=$(zustand)
+set +e
+VPKG_TEST_ABBRUCH=absturz:3 vx install "$P/app-2.0-1-x86_64.vpkg" >/dev/null 2>&1
+rc=$?
+set -e
+[ "$rc" = 70 ] || fail "Absturz-Simulation lieferte $rc"
+[ -f "$tx/var/lib/vpkg/txn/journal" ] || fail "kein Journal nach Absturz"
+[ "$(zustand)" != "$vorher" ] || fail "Absturz-Simulation hat nichts veraendert, Test greift nicht"
+if vx check >"$t/out" 2>&1; then fail "check meldet unterbrochenen Vorgang nicht"; fi
+grep -q 'unterbrochen' "$t/out" || fail "check-Meldung: $(cat "$t/out")"
+vx recover >/dev/null 2>&1 || fail "recover"
+[ "$(zustand)" = "$vorher" ] || fail "recover stellt den Zustand nicht wieder her"
+sauber "recover"
+set +e
+VPKG_TEST_ABBRUCH=absturz:5 vx remove app >/dev/null 2>&1
+set -e
+vx install "$P/app-2.0-1-x86_64.vpkg" >"$t/out" 2>&1 || fail "Installation nach Absturz: $(cat "$t/out")"
+grep -q 'unterbrochener Vorgang' "$t/out" || fail "naechster Vorgang hat den Absturz nicht bemerkt"
+[ "$(cat "$tx/usr/bin/app")" = app2 ] && [ "$(vx list | tr '\n' ' ')" = "app 2.0-1 liba 1.0-1 " ] \
+  || fail "Zustand nach Wiederherstellung und Update: $(vx list)"
+sauber "Update nach Absturz"
+ok "Absturz mitten im Vorgang: check meldet ihn, recover oder der naechste Vorgang nimmt ihn zurueck"
+
+if [ "$(id -u)" != 0 ]; then
+  mkpkg zwei 1 "" "" usr/bin/zwei=z usr/share/zwei/daten=d
+  mkdir -p "$tx/usr/share/zwei"
+  chmod 555 "$tx/usr/share/zwei"
+  vorher=$(zustand)
+  if vx install "$P/zwei-1-1-x86_64.vpkg" >"$t/out" 2>&1; then fail "Installation in schreibgeschuetztes Verzeichnis"; fi
+  grep -q '^vpkg: Installation abgebrochen' "$t/out" && ! grep -q Traceback "$t/out" \
+    || fail "Meldung bei fehlenden Rechten: $(cat "$t/out")"
+  [ "$(zustand)" = "$vorher" ] || fail "fehlgeschlagene Installation hat Dateien hinterlassen"
+  chmod 755 "$tx/usr/share/zwei"
+  sauber "fehlende Rechte"
+  ok "echter Schreibfehler (schreibgeschuetztes Verzeichnis): klare Meldung, nichts bleibt liegen"
+else
+  echo "uebersprungen - Schreibfehler durch fehlende Rechte (laeuft als root, Rechte greifen nicht)"
+fi
+
+# ---- Manipulierte Manifeste werden vor jeder Aenderung abgelehnt.
+# boese NAME AWK-PROGRAMM: Paket app-1.0 auspacken, Manifest umschreiben, neu packen.
+boese() {
+  local d=$t/boese/$1
+  mkdir -p "$d"
+  zstd -q -dc "$P/app-1.0-1-x86_64.vpkg" | tar -xf - -C "$d"
+  awk "$2" "$d/manifest.toml" > "$d/m" && mv "$d/m" "$d/manifest.toml"
+  (cd "$d" && tar --sort=name -cf - manifest.toml files | zstd -q -o "$t/boese/$1.vpkg")
+}
+boese rechte '/^mode = "755"/ && !x { print "mode = \"9999\""; x=1; next } { print }'
+boese doppelt '{ print } /^\[\[file\]\]/ { n++ } END { print "[[file]]\npath = \"/usr\"\ntype = \"dir\"\nmode = \"755\"" }'
+boese datenbank 'END { print "[[file]]\npath = \"/var/lib/vpkg/installed/liba\"\ntype = \"dir\"\nmode = \"755\"" } { print }'
+boese unterlink 'END { print "[[file]]\npath = \"/usr/bin/app/x\"\ntype = \"dir\"\nmode = \"755\"" } { print }'
+boese pruefsumme '/^sha256 = / && !x { print "sha256 = \"xyz\""; x=1; next } { print }'
+boese typ '/^type = "file"/ && !x { print "type = \"fifo\""; x=1; next } { print }'
+boese abhaengigkeit '/^depends = / { print "depends = [\"../etc\"]"; next } { print }'
+vorher=$(zustand)
+for b in rechte doppelt datenbank unterlink pruefsumme typ abhaengigkeit; do
+  if vx install "$t/boese/$b.vpkg" >"$t/out" 2>&1; then fail "manipuliertes Manifest ($b) angenommen"; fi
+  grep -q '^vpkg: ' "$t/out" && ! grep -q Traceback "$t/out" || fail "Manifest $b: $(cat "$t/out")"
+  [ "$(zustand)" = "$vorher" ] || fail "manipuliertes Manifest ($b) hat das System veraendert"
+done
+sauber "Manifeste"
+ok "manipulierte Manifeste (Rechte, doppelte Pfade, Paketdatenbank, Pfad unter Datei, Pruefsumme, Typ, Abhaengigkeit) abgelehnt"
+
+echo "Alle $n VPKG-Tests bestanden."

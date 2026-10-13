@@ -1,4 +1,4 @@
-# VPKG 0.1: Bedienung
+# VPKG 0.2: Bedienung
 
 `vpkg` ist die Paketverwaltung von Veyra OS (`packages/base/vpkg/vpkg`, Python 3.11+,
 nur Standardbibliothek, dazu `zstd`, `tar` und `openssl`). Sie installiert, aktualisiert
@@ -15,6 +15,7 @@ weiß zu jeder Datei, zu welchem Paket sie gehört.
 | `vpkg files NAME` | Dateien eines Pakets. |
 | `vpkg owner PFAD` | Zu welchem Paket eine Datei gehört. |
 | `vpkg check [NAME...]` | Installierte Dateien gegen die Prüfsummen prüfen, fehlende Abhängigkeiten melden. |
+| `vpkg recover` | Einen unterbrochenen Vorgang (Absturz, Stromausfall) zurücknehmen. Passiert auch automatisch beim nächsten schreibenden Befehl. |
 | `vpkg register PAKET...` | Pakete eintragen, deren Dateien schon im System liegen (Bau des Basissystems). |
 | `vpkg index VERZ` | `index.toml` für ein Repository-Verzeichnis schreiben. |
 
@@ -32,6 +33,39 @@ Alle Befehle verstehen `--root DIR`, um ein anderes System zu bearbeiten (so bau
   [signaturen.md](signaturen.md)).
 - Dateien, die einem anderen Paket gehören oder keinem Paket gehören, werden nicht
   überschrieben (außer mit `--overwrite`).
+- Das Manifest wird vor jeder Änderung vollständig geprüft: Versionsangaben, Namen in
+  `depends`/`provides`/`conflicts`, Dateityp, Rechte (oktal, höchstens 4 Stellen),
+  Prüfsummen (64 Hex-Zeichen), Link-Ziele. Abgelehnt werden außerdem doppelte Pfade,
+  Pfade mit `..` oder Nullbyte, Pfade unter `/var/lib/vpkg` und Einträge unterhalb einer
+  Datei oder eines Links.
+- Fehler beim Schreiben (volle Platte, fehlende Rechte) enden mit einer Meldung
+  `vpkg: ...`, nicht mit einem Python-Traceback.
+
+## Transaktionen
+
+`install`, `upgrade`, `remove` und `register` laufen als Transaktion: Entweder ist der
+ganze Vorgang ausgeführt, oder das System ist danach unverändert.
+
+- Jede Änderung (Datei anlegen oder ersetzen, Verzeichnis anlegen oder löschen, Datei
+  löschen oder umbenennen, Datenbankeintrag ändern) wird **vorher** in
+  `/var/lib/vpkg/txn/journal` protokolliert (eine JSON-Zeile, mit `fsync`). Ersetzte und
+  gelöschte Dateien bleiben bis zum Abschluss in `/var/lib/vpkg/txn/sicherung/`
+  (fester Link, sonst Kopie mit Besitzer und Rechten).
+- Neue Dateien werden erst als `.vpkg-PID-NAME` geschrieben und dann mit `rename`
+  an ihren Platz gesetzt; eine Datei ist also nie halb geschrieben.
+- Abschluss: das Journal wird gelöscht, danach die Sicherungen.
+- Scheitert eine Änderung, nimmt VPKG alle bisherigen in umgekehrter Reihenfolge zurück
+  und meldet `... abgebrochen (GRUND); N Aenderung(en) zurueckgenommen, das System ist
+  unveraendert`.
+- Bricht VPKG selbst ab (Absturz, Stromausfall), bleibt das Journal liegen. `vpkg check`
+  meldet das, `vpkg recover` oder der nächste schreibende Befehl nimmt den Vorgang
+  zurück. Lässt sich etwas nicht zurücknehmen, bleibt das Journal stehen und VPKG nennt
+  die betroffenen Pfade.
+- Nicht zurücknehmbar sind Install-Skripte (`post_install`): sie laufen erst nach dem
+  Abschluss. Scheitert eins, sind die Pakete installiert und VPKG sagt das.
+
+Für Tests gibt es `VPKG_TEST_ABBRUCH=fehler:N` (die Änderung nach der N-ten scheitert)
+und `VPKG_TEST_ABBRUCH=absturz:N` (VPKG beendet sich dort sofort, Rückgabewert 70).
 
 ## Konfigurationsdateien
 
@@ -50,11 +84,14 @@ es noch nicht.
 ## Datenbank
 
 `/var/lib/vpkg/installed/NAME/manifest.toml` (und `install`, falls vorhanden) je
-installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgänge.
+installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgänge,
+`/var/lib/vpkg/txn/` gibt es nur während eines Vorgangs (siehe Transaktionen).
 
-## Grenzen von 0.1
+## Grenzen von 0.2
 
-- Nicht atomar: bricht ein Vorgang mitten ab, kann ein halbfertiger Zustand bleiben.
-  `vpkg check` zeigt ihn, eine Neuinstallation des Pakets repariert ihn.
+- Install-Skripte lassen sich nicht zurücknehmen (siehe oben).
+- Die Transaktion schützt vor Abbrüchen, nicht vor Fremdeingriffen: wer während eines
+  Vorgangs selbst Dateien im System ändert, kann die Rücknahme stören (VPKG meldet das).
+- Der Repository-Index ist noch nicht signiert; Pakete selbst schon.
 - Keine Versionsbedingungen in Abhängigkeiten (nur Namen), kein `pre_remove`.
 - Kernel und Kernelmodule sind noch kein Paket.

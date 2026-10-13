@@ -21,7 +21,7 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Veyra-Kernel 6.18.56-veyra2 (Phase 4, ab veyra2 mit Laptop-Treibern) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch |
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
 | Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
-| Paketverwaltung VPKG 0.1 (installieren, entfernen, Abhängigkeiten) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 14 Tests grün, Selbsttest im gebooteten Abbild bestanden |
+| Paketverwaltung VPKG 0.2 (installieren, entfernen, Abhängigkeiten, Transaktionen mit Rücknahme) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 20 Tests grün, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
 | Paketsignaturen (Ed25519), Paket-Repository als CI-Artefakt | `packages/base/veyra-keyring/`, [docs/signaturen.md](docs/signaturen.md) | eingebaut, Schlüssel `veyra-2026` aktiv |
 | Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 6,4 s ab QEMU-Start mit KVM, [Messwerte](docs/messwerte.md)) |
 
@@ -36,17 +36,20 @@ mkdir -p out
 docker run --rm -v "$PWD:/repo:ro" -v "$PWD/out:/out" veyra-bootstrap /repo/build/scripts/ci-toolchain.sh
 ```
 
-VPKG-Tests (brauchen `zstd`, `openssl`, `python3`):
+VPKG-Tests (brauchen `zstd`, `openssl`, `python3`; am besten ohne root, sonst wird der
+Test mit schreibgeschützten Verzeichnissen übersprungen):
 
 ```bash
 bash tests/vpkg/run.sh
+bash tests/vpkg/vpkg-test.sh
 ```
 
 ## Dokumentation
 
 - [docs/architecture.md](docs/architecture.md): Architektur und Entscheidungen
 - [docs/vpkg-format.md](docs/vpkg-format.md): Paket- und Rezeptformat
-- [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.1
+- [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.2
+- [docs/phase6.md](docs/phase6.md): Phase 6, Bestandsaufnahme und VPKG-Transaktionen
 - [docs/signaturen.md](docs/signaturen.md): Paketsignaturen
 - [docs/virtualbox.md](docs/virtualbox.md): Veyra in VirtualBox starten (fertige VDI-Festplatte)
 - [docs/hardware-test.md](docs/hardware-test.md): Test auf echter Hardware vom USB-Stick (Phase 6)

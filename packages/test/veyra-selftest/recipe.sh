@@ -4,7 +4,7 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.2
+pkgver=0.3
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
@@ -29,6 +29,16 @@ else
   fail=1
 fi
 demo=$(ls /usr/lib/veyra/selftest/vpkg-demo-*.vpkg)
+# Transaktion (VPKG 0.2): bricht die Installation nach dem Kopieren der Datei ab, darf
+# nichts zurueckbleiben (keine Datei, kein Eintrag, kein Journal).
+if ! VPKG_TEST_ABBRUCH=fehler:1 vpkg install "$demo" >/run/vpkg-abbruch.log 2>&1 \
+   && grep -q 'das System ist unveraendert' /run/vpkg-abbruch.log \
+   && [ ! -e /usr/bin/vpkg-demo ] && ! vpkg list | grep -q '^vpkg-demo ' \
+   && [ ! -e /var/lib/vpkg/txn ] && vpkg check >/dev/null 2>&1; then
+  log "vpkg Abbruch und Ruecknahme: ok"
+else
+  log "vpkg Abbruch und Ruecknahme: FEHLER ($(tail -n 1 /run/vpkg-abbruch.log))"; fail=1
+fi
 if vpkg install "$demo" && [ "$(vpkg-demo)" = "vpkg-demo laeuft" ] \
    && grep -q post_install /var/lib/vpkg-demo/marker && vpkg check vpkg-demo >/dev/null; then
   log "vpkg install: ok (Programm laeuft, Install-Skript ausgefuehrt)"
