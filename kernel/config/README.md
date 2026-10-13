@@ -9,5 +9,6 @@ Die Konfiguration entsteht reproduzierbar aus zwei Teilen:
 Jede Zeile in einem Fragment hat einen Kommentar mit Begründung. Performance-Änderungen
 kommen erst mit Messung gegen diese Referenz (siehe docs/architecture.md).
 
-Core 0.1 zielt auf eine QEMU-VM (UEFI, virtio). Breite Hardwareunterstützung (AMD, NVIDIA,
-NVMe, USB, Audio) folgt in Phase 6.
+Core 0.1 zielt auf eine QEMU-VM (UEFI, virtio). `veyra-30-hardware.config` ergänzt für
+Phase 6 echte Laptops mit Intel-CPU (NVMe, Start vom USB-Stick, Intel-Grafik, Tastatur,
+Touchpad, WLAN-Treiber). AMD-Grafik und NVIDIA folgen später.

@@ -4,6 +4,8 @@
 # Aufbau (GPT):
 #   1  EFI-Systempartition (FAT32, 64 MiB): \EFI\BOOT\BOOTX64.EFI = Veyra-Kernel (EFI-Stub)
 #   2  Root (ext4, Partitionsname veyra-root): das Basissystem aus Stufe 4b
+#   3  Daten (FAT, Partitionsname veyra-daten, 32 MiB): Messwerte und Kernel-Log des
+#      Selbsttests, unter Windows als normales Laufwerk lesbar (Start vom USB-Stick)
 # Kein Bootloader, keine Initramfs: die Firmware startet den Kernel direkt, der Kernel
 # findet sein Root ueber root=PARTLABEL=veyra-root (eingebaute Kommandozeile).
 #
@@ -72,7 +74,9 @@ echo veyra > "$root/etc/hostname"
 cat > "$root/etc/fstab" <<'FSTAB'
 # Dateisystem          Ziel  Typ   Optionen  dump  fsck
 PARTLABEL=veyra-root   /     ext4  defaults  1     1
+PARTLABEL=veyra-daten  /mnt/daten  vfat  defaults,nofail,umask=022  0  0
 FSTAB
+install -d "$root/mnt/daten"
 echo 'LANG=C.UTF-8' > "$root/etc/locale.conf"
 # Leere machine-id: jedes gestartete System erzeugt beim ersten Start seine eigene.
 : > "$root/etc/machine-id"
@@ -98,8 +102,19 @@ mkfs.fat -C -F 32 -n VEYRA-EFI -i 5E7A0C0E "$work/esp.img" $((esp_mib * 1024)) >
 mmd -i "$work/esp.img" ::/EFI ::/EFI/BOOT
 mcopy -i "$work/esp.img" "$kernel" ::/EFI/BOOT/BOOTX64.EFI
 
+echo ">> Datenpartition"
+data_mib=32
+mkfs.fat -C -F 16 -n VEYRA-DATEN -i 5E7A0C0D "$work/data.img" $((data_mib * 1024)) >/dev/null
+cat > "$work/LIESMICH.txt" <<'TXT'
+Veyra OS: Datenpartition des Entwicklungsabbilds.
+Nach jedem Start schreibt der Selbsttest hierher:
+  veyra-messung.txt   Ergebnis des Selbsttests und Messwerte (Bootzeit, Speicher, SSD)
+  kernel-log.txt      Kernel-Meldungen (dmesg), zur Fehlersuche bei Hardware
+TXT
+mcopy -i "$work/data.img" "$work/LIESMICH.txt" ::/LIESMICH.txt
+
 echo ">> GPT-Abbild zusammensetzen"
-total_mib=$(( 1 + esp_mib + root_mib + 1 ))
+total_mib=$(( 1 + esp_mib + root_mib + data_mib + 1 ))
 rm -f "$img"
 truncate -s "${total_mib}M" "$img"
 sfdisk -q "$img" <<SFDISK
@@ -107,8 +122,10 @@ label: gpt
 label-id: 5E7A0C0E-0000-4000-8000-000000000000
 start=1MiB, size=${esp_mib}MiB, type=U, name="EFI", uuid=5E7A0C0E-0000-4000-8000-0000000000E1
 size=${root_mib}MiB, type=L, name="veyra-root", uuid=5E7A0C0E-0000-4000-8000-0000000000E2
+size=${data_mib}MiB, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="veyra-daten", uuid=5E7A0C0E-0000-4000-8000-0000000000E3
 SFDISK
 dd if="$work/esp.img" of="$img" bs=1M seek=1 conv=notrunc status=none
 dd if="$work/root.img" of="$img" bs=1M seek=$((1 + esp_mib)) conv=notrunc status=none
+dd if="$work/data.img" of="$img" bs=1M seek=$((1 + esp_mib + root_mib)) conv=notrunc status=none
 sfdisk -l "$img"
 echo "Abbild fertig: $img (Kernel $kver)"

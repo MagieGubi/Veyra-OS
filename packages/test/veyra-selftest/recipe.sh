@@ -1,8 +1,10 @@
 # Selbsttest fuer das Entwicklungsabbild: laeuft einmal nach dem Start, prueft die
 # Paketdatenbank (vpkg check) und installiert und entfernt das Testpaket vpkg-demo.
 # Ergebnis auf der seriellen Konsole: "VEYRA-SELBSTTEST: OK" oder "VEYRA-SELBSTTEST: FEHLER".
+# Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
+# zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.1
+pkgver=0.2
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
@@ -14,6 +16,8 @@ package() {
   cat > "$pkgdir/usr/lib/veyra/selftest.sh" <<'SH'
 #!/bin/bash
 set -u
+bericht=/run/veyra-selbsttest.txt
+main() {
 log() { echo "VEYRA-SELBSTTEST: $*"; }
 fail=0
 log "Start (vpkg $(vpkg --version | cut -d' ' -f2), $(vpkg list | wc -l) Pakete eingetragen)"
@@ -55,7 +59,34 @@ m "Speicher belegt: $(free -m | awk '/^Mem:/ {print $3}') MiB von $(free -m | aw
 m "Prozesse: $(ps -e --no-headers | wc -l), davon Kernel-Threads: $(ps -e -o ppid= | awk '$1 == 2' | wc -l)"
 m "Root-Dateisystem belegt: $(df -m / | awk 'NR == 2 {print $3}') MiB"
 m "Laufende Dienste: $(systemctl list-units --type=service --state=running --no-legend | wc -l)"
+# Hardware (Phase 6): was erkannt wurde und wie schnell die SSD liest.
+m "Kernel: $(uname -r), Root: $(findmnt -no SOURCE /)"
+m "CPU:$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2-), $(nproc) Threads"
+for c in /sys/class/drm/card[0-9]; do
+  [ -e "$c/device/driver" ] && m "Grafik: $(basename "$c") Treiber $(basename "$(readlink -f "$c/device/driver")")"
+done
+m "Netzwerk: $(cd /sys/class/net && echo *)"
+# Nur lesen (dd von der Platte nach /dev/null), es wird nichts geschrieben.
+for n in /dev/nvme[0-9]n1; do
+  [ -b "$n" ] || continue
+  m "SSD $n: $(cat "/sys/block/${n#/dev/}/device/model" 2>/dev/null | xargs)"
+  m "SSD $n lesen (1 GiB, direkt): $(dd if="$n" of=/dev/null bs=4M count=256 iflag=direct 2>&1 | tail -n 1)"
+done
+if [ -e /dev/disk/by-partlabel/veyra-daten ]; then
+  if mountpoint -q /mnt/daten && touch /mnt/daten/.schreibtest && rm /mnt/daten/.schreibtest; then
+    log "Datenpartition: ok (/mnt/daten, Bericht kommt nach veyra-messung.txt)"
+  else
+    log "Datenpartition: FEHLER (nicht eingehaengt oder nicht beschreibbar)"; fail=1
+  fi
+fi
 if [ $fail = 0 ]; then log OK; else log FEHLER; fi
+}
+main 2>&1 | tee "$bericht"
+if mountpoint -q /mnt/daten; then
+  cp "$bericht" /mnt/daten/veyra-messung.txt
+  dmesg > /mnt/daten/kernel-log.txt
+  sync
+fi
 SH
   chmod 755 "$pkgdir/usr/lib/veyra/selftest.sh"
   # Start per Timer 20 s nach dem Booten: so gehoert der Test nicht zum Startvorgang,

@@ -18,7 +18,7 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Gepinnte Quellen mit Signaturprüfung | `toolchain/sources.list`, `toolchain/sources.lock`, `build/scripts/fetch-sources.sh` | im CI |
 | Cross-Toolchain (Stufe 2) | `toolchain/build-cross.sh`, Workflow `Toolchain` | im CI gebaut (GCC 15.2.0, glibc 2.42) |
 | Temporäre Werkzeuge (Stufe 3) | `temptools/build-temp.sh`, Workflow `Toolchain` | im CI gebaut |
-| Veyra-Kernel 6.18.56-veyra1 (Phase 4) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch (bzImage `7fac3305…`) |
+| Veyra-Kernel 6.18.56-veyra2 (Phase 4, ab veyra2 mit Laptop-Treibern) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch |
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
 | Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
 | Paketverwaltung VPKG 0.1 (installieren, entfernen, Abhängigkeiten) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 14 Tests grün, Selbsttest im gebooteten Abbild bestanden |
@@ -48,6 +48,7 @@ bash tests/vpkg/run.sh
 - [docs/vpkg-format.md](docs/vpkg-format.md): Paket- und Rezeptformat
 - [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.1
 - [docs/signaturen.md](docs/signaturen.md): Paketsignaturen
+- [docs/hardware-test.md](docs/hardware-test.md): Test auf echter Hardware vom USB-Stick (Phase 6)
 - [docs/messwerte.md](docs/messwerte.md): Bootzeit und Ressourcen (VM)
 - [docs/build-guide.md](docs/build-guide.md): Bauablauf, Quellen und Lizenzen
 
