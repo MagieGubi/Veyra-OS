@@ -1,4 +1,4 @@
-# Veyra OS
+# Veyra OS (mit n.tomiska)
 
 Veyra OS ist ein minimalistisches Linux-System, das vollständig aus Quellcode gebaut wird:
 eigener Kernel auf Linux-Basis, eigenes Basissystem ohne fremde Distribution, eigener
