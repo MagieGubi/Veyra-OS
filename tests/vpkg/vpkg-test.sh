@@ -225,8 +225,9 @@ VPKG_TEST_ABBRUCH=absturz:5 vx remove app >/dev/null 2>&1
 set -e
 vx install "$P/app-2.0-1-x86_64.vpkg" >"$t/out" 2>&1 || fail "Installation nach Absturz: $(cat "$t/out")"
 grep -q 'unterbrochener Vorgang' "$t/out" || fail "naechster Vorgang hat den Absturz nicht bemerkt"
-[ "$(cat "$tx/usr/bin/app")" = app2 ] && [ "$(vx list | tr '\n' ' ')" = "app 2.0-1 liba 1.0-1 " ] \
-  || fail "Zustand nach Wiederherstellung und Update: $(vx list)"
+if [ "$(cat "$tx/usr/bin/app")" != app2 ] || [ "$(vx list | tr '\n' ' ')" != "app 2.0-1 liba 1.0-1 " ]; then
+  fail "Zustand nach Wiederherstellung und Update: $(vx list)"
+fi
 sauber "Update nach Absturz"
 ok "Absturz mitten im Vorgang: check meldet ihn, recover oder der naechste Vorgang nimmt ihn zurueck"
 
@@ -236,8 +237,9 @@ if [ "$(id -u)" != 0 ]; then
   chmod 555 "$tx/usr/share/zwei"
   vorher=$(zustand)
   if vx install "$P/zwei-1-1-x86_64.vpkg" >"$t/out" 2>&1; then fail "Installation in schreibgeschuetztes Verzeichnis"; fi
-  grep -q '^vpkg: Installation abgebrochen' "$t/out" && ! grep -q Traceback "$t/out" \
-    || fail "Meldung bei fehlenden Rechten: $(cat "$t/out")"
+  if ! grep -q '^vpkg: Installation abgebrochen' "$t/out" || grep -q Traceback "$t/out"; then
+    fail "Meldung bei fehlenden Rechten: $(cat "$t/out")"
+  fi
   [ "$(zustand)" = "$vorher" ] || fail "fehlgeschlagene Installation hat Dateien hinterlassen"
   chmod 755 "$tx/usr/share/zwei"
   sauber "fehlende Rechte"
@@ -265,7 +267,7 @@ boese abhaengigkeit '/^depends = / { print "depends = [\"../etc\"]"; next } { pr
 vorher=$(zustand)
 for b in rechte doppelt datenbank unterlink pruefsumme typ abhaengigkeit; do
   if vx install "$t/boese/$b.vpkg" >"$t/out" 2>&1; then fail "manipuliertes Manifest ($b) angenommen"; fi
-  grep -q '^vpkg: ' "$t/out" && ! grep -q Traceback "$t/out" || fail "Manifest $b: $(cat "$t/out")"
+  if ! grep -q '^vpkg: ' "$t/out" || grep -q Traceback "$t/out"; then fail "Manifest $b: $(cat "$t/out")"; fi
   [ "$(zustand)" = "$vorher" ] || fail "manipuliertes Manifest ($b) hat das System veraendert"
 done
 sauber "Manifeste"
