@@ -10,7 +10,7 @@ url=https://github.com/MagieGubi/Veyra-OS
 depends=(vpkg systemd bash)
 
 package() {
-  install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system/multi-user.target.wants"
+  install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
   cat > "$pkgdir/usr/lib/veyra/selftest.sh" <<'SH'
 #!/bin/bash
 set -u
@@ -58,19 +58,29 @@ m "Laufende Dienste: $(systemctl list-units --type=service --state=running --no-
 if [ $fail = 0 ]; then log OK; else log FEHLER; fi
 SH
   chmod 755 "$pkgdir/usr/lib/veyra/selftest.sh"
+  # Start per Timer 20 s nach dem Booten: so gehoert der Test nicht zum Startvorgang,
+  # verfaelscht die gemessene Bootzeit nicht und systemd-analyze hat fertige Werte.
   cat > "$pkgdir/usr/lib/systemd/system/veyra-selftest.service" <<'UNIT'
 [Unit]
 Description=Veyra Selbsttest (Entwicklungsabbild)
-After=multi-user.target serial-getty@ttyS0.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/lib/veyra/selftest.sh
 StandardOutput=journal+console
 StandardError=journal+console
+UNIT
+  cat > "$pkgdir/usr/lib/systemd/system/veyra-selftest.timer" <<'UNIT'
+[Unit]
+Description=Veyra Selbsttest 20 s nach dem Booten
+
+[Timer]
+OnBootSec=20s
+AccuracySec=1s
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=timers.target
 UNIT
-  ln -s ../veyra-selftest.service "$pkgdir/usr/lib/systemd/system/multi-user.target.wants/veyra-selftest.service"
+  install -d "$pkgdir/usr/lib/systemd/system/timers.target.wants"
+  ln -s ../veyra-selftest.timer "$pkgdir/usr/lib/systemd/system/timers.target.wants/veyra-selftest.timer"
 }
