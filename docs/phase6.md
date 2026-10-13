@@ -72,7 +72,10 @@ VPKG 0.2 (`packages/base/vpkg/vpkg`):
   automatisch zurück.
 - **Strenge Manifestprüfung** vor jeder Änderung: Typ, Rechte, Prüfsumme, Link-Ziel,
   Namen in Abhängigkeiten, keine doppelten Pfade, nichts unter `/var/lib/vpkg`, nichts
-  unterhalb einer Datei oder eines Links, kein Nullbyte im Pfad.
+  unterhalb einer Datei oder eines Links, kein Nullbyte im Pfad. Erlaubt sind dort nur
+  die leeren Grundverzeichnisse `/var/lib/vpkg` und `/var/lib/vpkg/installed`, die das
+  Paket `vpkg` selbst mitbringt. Der erste CI-Lauf mit der Änderung scheiterte genau
+  daran beim Bau des Abbilds; Test 21 deckt das jetzt ab.
 - **Fehlermeldungen** statt Traceback bei Schreibfehlern.
 - Neuer Datenbankeintrag wird im Transaktionsverzeichnis vorbereitet, nicht mehr als
   `installed/NAME.neu`. Ein Abbruch genau an dieser Stelle hinterließ sonst ein
@@ -84,7 +87,7 @@ VPKG 0.2 (`packages/base/vpkg/vpkg`):
 | --- | --- |
 | `packages/base/vpkg/vpkg` | Transaktionen, Wiederherstellung, Manifestprüfung, Fehlermeldungen; Version 0.2 |
 | `packages/base/vpkg/recipe.sh` | Version 0.2, neue Prüfsumme des Programms |
-| `tests/vpkg/vpkg-test.sh` | Tests 16 bis 20 (siehe unten) |
+| `tests/vpkg/vpkg-test.sh` | Tests 16 bis 21 (siehe unten) |
 | `packages/test/veyra-selftest/recipe.sh` | Selbsttest im gebooteten System bricht eine Installation ab und prüft die Rücknahme (Version 0.3) |
 | `.github/workflows/toolchain.yml` | nur der Name des VPKG-Testschritts |
 | `docs/vpkg.md`, `README.md`, `docs/phase6.md` | Dokumentation |
@@ -100,6 +103,7 @@ Neue Tests in `tests/vpkg/vpkg-test.sh`:
 | 18 | Simulierter Absturz (Prozess endet sofort): Journal bleibt, `vpkg check` meldet es, `vpkg recover` stellt den Zustand wieder her; nach einem zweiten Absturz nimmt die nächste Installation ihn selbst zurück und läuft dann durch. |
 | 19 | Echter Schreibfehler (schreibgeschütztes Verzeichnis): Meldung `vpkg: Installation abgebrochen ...`, nichts bleibt liegen. Läuft nur ohne root (als root greifen die Rechte nicht); das CI läuft ohne root. |
 | 20 | Sieben manipulierte Manifeste (Rechte `9999`, doppelter Pfad, Pfad in der Paketdatenbank, Pfad unter einer Datei, ungültige Prüfsumme, unbekannter Typ, Abhängigkeit `../etc`) werden ohne Traceback und ohne Änderung abgelehnt. |
+| 21 | Alle eigenen Pakete (`packages/base/*`, `packages/test/*`), so gebaut wie im CI, bestehen die Manifestprüfung. |
 
 Selbsttest im Abbild (CI-Jobs `image` und `live-iso`): `VPKG_TEST_ABBRUCH=fehler:1 vpkg
 install vpkg-demo` muss scheitern, danach darf weder `/usr/bin/vpkg-demo` noch der
@@ -109,8 +113,8 @@ Eintrag noch `/var/lib/vpkg/txn` existieren, und `vpkg check` muss fehlerfrei se
 
 | Befehl | Ergebnis |
 | --- | --- |
-| `bash tests/vpkg/vpkg-test.sh` als root | 19 von 19 bestanden, Test 19 übersprungen (root) |
-| `bash tests/vpkg/vpkg-test.sh` als Benutzer `nobody` | 20 von 20 bestanden |
+| `bash tests/vpkg/vpkg-test.sh` als root | 20 von 20 bestanden, Test 19 übersprungen (root) |
+| `bash tests/vpkg/vpkg-test.sh` als Benutzer `nobody` | 21 von 21 bestanden |
 | `bash tests/vpkg/run.sh` | 6 von 6 bestanden |
 | Einmalige Zusatzprüfung: simulierter Absturz an **jeder** Stelle eines Updates (9 Änderungen) und eines Entfernens (12 Änderungen), danach `vpkg recover` | an allen 21 Stellen Zustand identisch, `vpkg check` fehlerfrei |
 | Nachstellung des ursprünglichen Fehlers (schreibgeschütztes `/usr/lib`) | jetzt: `vpkg: Installation abgebrochen ([Errno 13] Permission denied ...); 2 Aenderung(en) zurueckgenommen, das System ist unveraendert`, `/usr/bin/eins` weg |

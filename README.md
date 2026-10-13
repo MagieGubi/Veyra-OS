@@ -21,7 +21,7 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Veyra-Kernel 6.18.56-veyra2 (Phase 4, ab veyra2 mit Laptop-Treibern) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch |
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
 | Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
-| Paketverwaltung VPKG 0.2 (installieren, entfernen, Abhängigkeiten, Transaktionen mit Rücknahme) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 20 Tests grün, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
+| Paketverwaltung VPKG 0.2 (installieren, entfernen, Abhängigkeiten, Transaktionen mit Rücknahme) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 21 Tests grün, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
 | Paketsignaturen (Ed25519), Paket-Repository als CI-Artefakt | `packages/base/veyra-keyring/`, [docs/signaturen.md](docs/signaturen.md) | eingebaut, Schlüssel `veyra-2026` aktiv |
 | Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 6,4 s ab QEMU-Start mit KVM, [Messwerte](docs/messwerte.md)) |
 

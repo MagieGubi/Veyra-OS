@@ -167,9 +167,12 @@ class Paket:
             rel = safe_rel(e["path"])
             if rel in seen:
                 raise Fehler(f"{self.path}: /{rel} steht doppelt im Manifest")
-            if rel == DB or rel.startswith(DB + "/"):
-                raise Fehler(f"{self.path}: /{rel} liegt in der Paketdatenbank von VPKG")
             t = e.get("type")
+            # Nur die leeren Grundverzeichnisse der Datenbank darf ein Paket mitbringen
+            # (das Paket vpkg selbst), nichts darin.
+            if (rel == DB or rel.startswith(DB + "/")) and not (
+                    t == "dir" and rel in (DB, DB + "/installed")):
+                raise Fehler(f"{self.path}: /{rel} liegt in der Paketdatenbank von VPKG")
             if t not in ("file", "dir", "symlink"):
                 raise Fehler(f"{self.path}: /{rel}: unbekannter Typ {t!r}")
             if t in ("file", "dir") and not (isinstance(e.get("mode"), str) and MODE_RE.match(e["mode"])):

@@ -273,4 +273,14 @@ done
 sauber "Manifeste"
 ok "manipulierte Manifeste (Rechte, doppelte Pfade, Paketdatenbank, Pfad unter Datei, Pruefsumme, Typ, Abhaengigkeit) abgelehnt"
 
+# Die eigenen Pakete (wie im CI-Job "image" gebaut) muessen die Manifestpruefung bestehen;
+# vpkg selbst bringt z. B. die leeren Verzeichnisse der Paketdatenbank mit.
+mkdir "$t/eigene"
+for r in "$here"/packages/base/* "$here"/packages/test/*; do
+  "$build" --srcdir "$here" --outdir "$t/eigene" "$r" >/dev/null || fail "Bau von $r"
+done
+python3 "$here/packages/base/vpkg/vpkg" index "$t/eigene" >"$t/out" 2>&1 \
+  || fail "eigene Pakete abgelehnt: $(cat "$t/out")"
+ok "eigene Pakete (vpkg, veyra-keyring, veyra-release, Selbsttest) bestehen die Manifestpruefung"
+
 echo "Alle $n VPKG-Tests bestanden."

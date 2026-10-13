@@ -8,7 +8,7 @@ pkgdesc="Paketverwaltung von Veyra OS"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(vpkg)
-sha256sums=(d7b486bb4a3cecc8d879d57e2766b22c06b45d892a007cd9aea0747607c1cefc)
+sha256sums=(f6f3db8a82950854612b08e4aeae5a56512902b198c7254d22a381f3f1f7d9ff)
 depends=(python bash coreutils tar zstd openssl)
 
 package() {
