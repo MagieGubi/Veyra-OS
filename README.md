@@ -4,9 +4,9 @@ Veyra OS ist ein minimalistisches Linux-System, das vollständig aus Quellcode g
 eigener Kernel auf Linux-Basis, eigenes Basissystem ohne fremde Distribution, eigener
 Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 
-> Stand: Phase 3 (Projektstruktur und Build-Umgebung). Es gibt noch kein bootfähiges System.
-> Erster Meilenstein ist **Veyra Core 0.1**: der Veyra-Kernel bootet ein selbst gebautes
-> Minimalsystem in QEMU (UEFI) bis zur Textanmeldung.
+> Stand: **Veyra Core 0.1** bootet. Der Veyra-Kernel startet das selbst gebaute
+> Basissystem in QEMU direkt per UEFI bis zur Textanmeldung. Als Nächstes kommt
+> **VPKG 0.1**: Pakete im laufenden System installieren, aktualisieren und entfernen.
 
 ## Was schon da ist
 
@@ -21,6 +21,7 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Veyra-Kernel 6.18.56-veyra1 (Phase 4) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch (bzImage `7fac3305…`) |
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
 | Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
+| Paketverwaltung VPKG 0.1 (installieren, entfernen, Abhängigkeiten) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | Tests grün (`tests/vpkg/vpkg-test.sh`), Selbsttest im Abbild folgt |
 | Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 8,1 s ab QEMU-Start mit KVM) |
 
 ## Bauen
@@ -44,6 +45,7 @@ bash tests/vpkg/run.sh
 
 - [docs/architecture.md](docs/architecture.md): Architektur und Entscheidungen
 - [docs/vpkg-format.md](docs/vpkg-format.md): Paket- und Rezeptformat
+- [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.1
 - [docs/build-guide.md](docs/build-guide.md): Bauablauf, Quellen und Lizenzen
 
 ## Lizenz

@@ -2,9 +2,13 @@
 # Phase 5: startet das Abbild in QEMU mit UEFI-Firmware (OVMF) und wartet auf den Login.
 # Erfolg = auf der seriellen Konsole erscheint "veyra login:". Ausgabe: Konsolen-Log.
 #
-# Aufruf: image/boot-test.sh ABBILD.img LOG [SEKUNDEN]
+# Mit SELFTEST=1 wird danach zusaetzlich auf "VEYRA-SELBSTTEST: OK" gewartet
+# (Paket veyra-selftest im Abbild); "VEYRA-SELBSTTEST: FEHLER" ist ein Fehlschlag.
+#
+# Aufruf: [SELFTEST=1] image/boot-test.sh ABBILD.img LOG [SEKUNDEN]
 set -euo pipefail
 img=$1 log=$2 limit=${3:-600}
+selftest=${SELFTEST:-0}
 ovmf=/usr/share/OVMF/OVMF_CODE_4M.fd
 [ -f "$ovmf" ] || { echo "OVMF nicht gefunden: $ovmf" >&2; exit 1; }
 vars=$(mktemp)
@@ -22,13 +26,23 @@ qemu-system-x86_64 -machine q35,accel=$accel -m 2048 -smp 2 \
 qemu=$!
 trap 'kill $qemu 2>/dev/null || true; rm -f "$vars"' EXIT
 
+timed_out() { [ "$(echo "$(date +%s.%N) - $start > $limit" | bc)" = 1 ]; }
 result=1
 while kill -0 $qemu 2>/dev/null; do
   if grep -q 'veyra login:' "$log" 2>/dev/null; then result=0; break; fi
-  if [ "$(echo "$(date +%s.%N) - $start > $limit" | bc)" = 1 ]; then break; fi
-  sleep 1
+  if timed_out; then break; fi
+  sleep 0.2
 done
 end=$(date +%s.%N)
+st=0
+if [ $result = 0 ] && [ "$selftest" = 1 ]; then
+  st=1
+  while kill -0 $qemu 2>/dev/null && ! timed_out; do
+    if grep -q 'VEYRA-SELBSTTEST: OK' "$log"; then st=0; break; fi
+    if grep -q 'VEYRA-SELBSTTEST: FEHLER' "$log"; then break; fi
+    sleep 1
+  done
+fi
 echo "----- serielle Konsole -----"
 cat "$log" || true
 echo "----------------------------"
@@ -36,5 +50,9 @@ if [ $result = 0 ]; then
   printf 'ERFOLG: Login-Aufforderung nach %.1f s (gemessen ab QEMU-Start, %s)\n' "$(echo "$end - $start" | bc)" "$accel"
 else
   echo "FEHLER: keine Login-Aufforderung innerhalb von ${limit}s" >&2
+fi
+if [ "$selftest" = 1 ] && [ $result = 0 ]; then
+  if [ $st = 0 ]; then echo "ERFOLG: Selbsttest bestanden"; else echo "FEHLER: Selbsttest nicht bestanden" >&2; fi
+  result=$st
 fi
 exit $result

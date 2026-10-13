@@ -22,9 +22,13 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/run.sh
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
+      - name: VPKG 0.1 testen (installieren, entfernen, Abhaengigkeiten)
+        run: |
+          python3 -m py_compile packages/base/vpkg/vpkg
+          bash tests/vpkg/vpkg-test.sh
       - name: Rezepte und Quellenlisten pruefen
         run: |
           for r in packages/*/*/recipe.sh; do bash -n "$r"; done
@@ -308,6 +312,11 @@ jobs:
             out/stage4-sources.lock
             out/build-stage4b-1.log
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pakete-4b-1
+          path: out/packages
+          retention-days: 14
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
@@ -363,6 +372,11 @@ jobs:
             out/packages
             out/stage4-sources.lock
             out/build-stage4b-2.log
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pakete-4b-2
+          path: out/packages
           retention-days: 14
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
@@ -420,6 +434,11 @@ jobs:
             out/stage4-sources.lock
             out/build-stage4b-3.log
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pakete-4b-3
+          path: out/packages
+          retention-days: 14
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
@@ -451,16 +470,26 @@ jobs:
           name: kernel-a
           path: k
 
-      - name: veyra-release bauen
-        run: build/scripts/vpkg-build --srcdir "$PWD" --outdir extra packages/base/veyra-release
+      - name: Basispakete holen (fuer die VPKG-Datenbank)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pakete-4b-*
+          path: basis
+
+      - name: Zusatzpakete bauen (veyra-release, vpkg, Selbsttest)
+        run: |
+          for r in packages/base/veyra-release packages/base/vpkg packages/test/veyra-selftest; do
+            build/scripts/vpkg-build --srcdir "$PWD" --outdir extra "$r"
+          done
+          build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
 
       - name: Abbild bauen
         run: |
-          sudo image/build-image.sh sys/veyra-stage4b-3.tar.zst k/kernel extra veyra-core-0.1.img
+          sudo image/build-image.sh sys/veyra-stage4b-3.tar.zst k/kernel extra veyra-core-0.1.img basis
           sudo chown "$(id -u):$(id -g)" veyra-core-0.1.img
 
-      - name: Boot-Test (UEFI, kein Bootloader)
-        run: image/boot-test.sh veyra-core-0.1.img boot.log 600
+      - name: Boot-Test (UEFI, kein Bootloader) und VPKG-Selbsttest
+        run: SELFTEST=1 image/boot-test.sh veyra-core-0.1.img boot.log 600
 
       - name: Abbild packen
         if: always()

@@ -36,6 +36,16 @@ with open(os.path.join(root, "manifest.toml"), "rb") as f:
     m = tomllib.load(f)
 listed = set()
 bad = 0
+inst = os.path.join(root, "install")
+if "install_sha256" in m:
+    h = hashlib.sha256(open(inst, "rb").read()).hexdigest() if os.path.isfile(inst) else None
+    if h != m["install_sha256"]:
+        print("Install-Skript passt nicht zum Manifest", file=sys.stderr); bad += 1
+elif os.path.lexists(inst):
+    print("Install-Skript ohne Eintrag im Manifest", file=sys.stderr); bad += 1
+for n in os.listdir(root):
+    if n not in ("manifest.toml", "files", "install"):
+        print(f"unbekannter Eintrag im Paket: {n}", file=sys.stderr); bad += 1
 for e in m.get("file", []):
     rel = e["path"].lstrip("/")
     listed.add(rel)

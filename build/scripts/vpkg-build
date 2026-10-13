@@ -97,6 +97,22 @@ export srcdir pkgdir pkgname pkgver pkgrel
 echo ">> Baue $pkgname $pkgver-$pkgrel"
 ( cd "$srcdir" && build )
 ( cd "$srcdir" && package )
+# Das Info-Verzeichnis (usr/share/info/dir) schreibt install-info in jedem Paket neu; es
+# gehoert keinem Paket allein und wuerde sonst zwischen Paketen kollidieren.
+rm -f "$pkgdir/usr/share/info/dir"
+
+# Install-Skript: definiert das Rezept post_install(), kommt sie als Datei "install" ins Paket.
+# VPKG fuehrt sie nach dem Auspacken im Zielsystem aus (dort mit chroot).
+mkdir "$work/root"
+install_sha=""
+if declare -F post_install >/dev/null; then
+  {
+    echo "# post_install aus dem Rezept von $pkgname $pkgver-$pkgrel"
+    printf 'pkgname=%q pkgver=%q pkgrel=%q\n' "$pkgname" "$pkgver" "$pkgrel"
+    declare -f post_install
+  } > "$work/root/install"
+  install_sha=$(sha256sum "$work/root/install" | cut -d' ' -f1)
+fi
 
 # Manifest erzeugen. Dateien sortiert, damit es bei gleichem Inhalt identisch ist.
 manifest=$work/manifest.toml
@@ -117,6 +133,7 @@ list() { local out="" x; for x in "$@"; do out+="${out:+, }$(q "$x")"; done; pri
   echo "provides = $(list "${provides[@]}")"
   echo "recipe_sha256 = $(q "$(sha256sum "$recipe" | cut -d' ' -f1)")"
   echo "build_date = $SOURCE_DATE_EPOCH"
+  [ -z "$install_sha" ] || echo "install_sha256 = $(q "$install_sha")"
   for i in "${!sources[@]}"; do
     echo
     echo "[[source]]"
@@ -143,7 +160,6 @@ list() { local out="" x; for x in "$@"; do out+="${out:+, }$(q "$x")"; done; pri
 } > "$manifest"
 
 # Archiv: manifest.toml zuerst, dann files/. Feste Reihenfolge, Besitzer und Zeiten.
-mkdir "$work/root"
 mv "$manifest" "$work/root/manifest.toml"
 mv "$pkgdir" "$work/root/files"
 out=$outdir/$pkgname-$pkgver-$pkgrel-$arch.vpkg
@@ -151,7 +167,7 @@ mktar() {
   tar --sort=name --format=posix \
       --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
       --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
-      -C "$work/root" -cf - manifest.toml files
+      -C "$work/root" -cf - manifest.toml files ${install_sha:+install}
 }
 if [ $compress = 1 ]; then
   mktar | zstd -q -19 -T1 -o "$out" -f

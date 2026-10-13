@@ -7,14 +7,19 @@
 # Kein Bootloader, keine Initramfs: die Firmware startet den Kernel direkt, der Kernel
 # findet sein Root ueber root=PARTLABEL=veyra-root (eingebaute Kommandozeile).
 #
-# Aufruf (als root, braucht mkfs.ext4, mkfs.fat, mtools, sfdisk, zstd):
-#   image/build-image.sh SYSTEM.tar.zst KERNEL-VERZ PAKET-VERZ AUSGABE.img
+# Aufruf (als root, braucht mkfs.ext4, mkfs.fat, mtools, sfdisk, zstd, python3 >= 3.11):
+#   image/build-image.sh SYSTEM.tar.zst KERNEL-VERZ PAKET-VERZ AUSGABE.img [BASIS-VERZ]
 #   KERNEL-VERZ enthaelt vmlinuz-* und modules-*.tar.zst (Phase 4),
-#   PAKET-VERZ zusaetzliche .vpkg-Dateien, die ins Abbild sollen (z. B. veyra-release).
+#   PAKET-VERZ zusaetzliche .vpkg-Dateien, die mit VPKG ins Abbild installiert werden
+#     (z. B. veyra-release, vpkg); liegt darin ein Ordner selftest/, kommt sein Inhalt
+#     nach /usr/lib/veyra/selftest (Testpakete fuer den Selbsttest),
+#   BASIS-VERZ die .vpkg-Dateien des Basissystems (Stufe 4b); sie werden in die
+#     VPKG-Datenbank des Abbilds eingetragen (vpkg register).
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "build-image.sh braucht root" >&2; exit 1; }
-[ $# -eq 4 ] || { sed -n '2,15p' "$0"; exit 1; }
-system=$1 kdir=$2 pkgdir=$3 img=$4
+[ $# -eq 4 ] || [ $# -eq 5 ] || { sed -n '2,20p' "$0"; exit 1; }
+system=$1 kdir=$2 pkgdir=$3 img=$4 basedir=${5:-}
+vpkg=$(cd "$(dirname "$0")/.." && pwd)/packages/base/vpkg/vpkg
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1767225600}
 
 work=$(mktemp -d)
@@ -31,11 +36,28 @@ echo ">> Kernelmodule und Zusatzpakete"
 kernel=$(ls "$kdir"/vmlinuz-*)
 kver=${kernel##*/vmlinuz-}
 zstd -q -dc "$kdir/modules-$kver.tar.zst" | tar -xpf - -C "$root" --keep-directory-symlink
-for p in "$pkgdir"/*.vpkg; do
-  [ -e "$p" ] || continue
-  echo "   $(basename "$p")"
-  zstd -q -dc "$p" | tar -xpf - -C "$root" --strip-components=1 --keep-directory-symlink files
-done
+if [ -n "$basedir" ]; then
+  echo ">> Basispakete in die VPKG-Datenbank eintragen"
+  mapfile -t base < <(find "$basedir" -name '*.vpkg' | LC_ALL=C sort)
+  [ "${#base[@]}" -gt 0 ] || { echo "keine Basispakete in $basedir" >&2; exit 1; }
+  python3 "$vpkg" --root "$root" register "${base[@]}"
+fi
+mapfile -t extra < <(find "$pkgdir" -maxdepth 1 -name '*.vpkg' | LC_ALL=C sort)
+if [ "${#extra[@]}" -gt 0 ]; then
+  if [ -n "$basedir" ]; then
+    python3 "$vpkg" --root "$root" install "${extra[@]}"
+  else
+    # Ohne Datenbank des Basissystems nur auspacken (Abhaengigkeiten nicht pruefbar).
+    for p in "${extra[@]}"; do
+      echo "   $(basename "$p")"
+      zstd -q -dc "$p" | tar -xpf - -C "$root" --strip-components=1 --keep-directory-symlink files
+    done
+  fi
+fi
+if [ -d "$pkgdir/selftest" ]; then
+  install -d "$root/usr/lib/veyra/selftest"
+  cp "$pkgdir"/selftest/* "$root/usr/lib/veyra/selftest/"
+fi
 
 echo ">> Systemkonfiguration"
 echo veyra > "$root/etc/hostname"

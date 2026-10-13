@@ -1,0 +1,804 @@
+#!/usr/bin/env python3
+# vpkg 0.1: Paketverwaltung von Veyra OS.
+#
+# Installiert, aktualisiert und entfernt .vpkg-Pakete (Format: docs/vpkg-format.md),
+# loest Abhaengigkeiten auf und fuehrt Buch darueber, welche Datei zu welchem Paket gehoert.
+#
+#   vpkg [--root DIR] install [--repo QUELLE] [--overwrite] [--no-deps] [--no-scripts] PAKET...
+#   vpkg [--root DIR] upgrade [--repo QUELLE]
+#   vpkg [--root DIR] remove [--no-deps] NAME...
+#   vpkg [--root DIR] list | info NAME | files NAME | owner PFAD | check [NAME...]
+#   vpkg [--root DIR] register PAKET.vpkg...      (schon ausgepackte Pakete eintragen)
+#   vpkg index VERZEICHNIS                         (index.toml fuer ein Paket-Repository)
+#
+# PAKET ist eine .vpkg-Datei oder ein Paketname aus dem Repository.
+# QUELLE ist ein Verzeichnis oder eine http(s)-Adresse mit index.toml; ohne --repo gilt
+# die erste Zeile von ROOT/etc/vpkg/repo.
+#
+# Signaturen: Liegen oeffentliche Schluessel in ROOT/etc/vpkg/keys/*.pem (oder wird
+# --pubkey angegeben), muss jedes Paket eine gueltige Ed25519-Signatur PAKET.vpkg.sig haben.
+#
+# Grenzen von 0.1: Vorgaenge sind nicht atomar. Bricht eine Installation mitten ab, kann
+# ein halbfertiger Zustand bleiben; "vpkg check" zeigt ihn an.
+import argparse
+import fcntl
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+import urllib.parse
+import urllib.request
+
+VERSION = "0.1"
+DB = "var/lib/vpkg"
+KEYS = "etc/vpkg/keys"
+REPO_FILE = "etc/vpkg/repo"
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9+._-]*$")
+
+
+class Fehler(Exception):
+    pass
+
+
+def info(msg):
+    print(msg, flush=True)
+
+
+def warn(msg):
+    print(f"vpkg: Warnung: {msg}", file=sys.stderr, flush=True)
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def toml_str(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+# ---------------------------------------------------------------- Versionen
+
+def vercmp(a, b):
+    """Vergleicht zwei Versionen wie "1.10.2-1" (Zahlen numerisch, Rest als Text)."""
+    def parts(v):
+        return [(0, int(x)) if x.isdigit() else (1, x) for x in re.findall(r"\d+|[A-Za-z]+", v)]
+    pa, pb = parts(a), parts(b)
+    for x, y in zip(pa, pb):
+        if x != y:
+            # Zahl gilt als neuer als Buchstaben (1.0 > 1.0rc)
+            if x[0] != y[0]:
+                return -1 if x[0] == 1 else 1
+            return -1 if x[1] < y[1] else 1
+    if len(pa) == len(pb):
+        return 0
+    longer, sign = (pa, 1) if len(pa) > len(pb) else (pb, -1)
+    nxt = longer[min(len(pa), len(pb))]
+    return sign if nxt[0] == 0 else -sign
+
+
+def fullver(m):
+    return f"{m['version']}-{m.get('release', 1)}"
+
+
+# ---------------------------------------------------------------- Pakete
+
+class Paket:
+    """Eine .vpkg-Datei, ausgepackt in ein temporaeres Verzeichnis und geprueft."""
+
+    def __init__(self, path, tmp, keys):
+        self.path = path
+        self.dir = tempfile.mkdtemp(dir=tmp)
+        self.check_signature(keys)
+        p = subprocess.run(f"zstd -q -dc -- {sh(path)} | tar -xf - -C {sh(self.dir)}",
+                           shell=True, stderr=subprocess.PIPE, text=True)
+        if p.returncode != 0:
+            raise Fehler(f"{path}: Archiv beschaedigt ({p.stderr.strip()})")
+        mf = os.path.join(self.dir, "manifest.toml")
+        if not os.path.isfile(mf):
+            raise Fehler(f"{path}: manifest.toml fehlt")
+        with open(mf, "rb") as f:
+            self.m = tomllib.load(f)
+        if self.m.get("format") != 1:
+            raise Fehler(f"{path}: unbekanntes Paketformat {self.m.get('format')}")
+        if not NAME_RE.match(self.m.get("name", "")):
+            raise Fehler(f"{path}: ungueltiger Paketname")
+        self.verify_content()
+
+    @property
+    def name(self):
+        return self.m["name"]
+
+    def check_signature(self, keys):
+        if not keys:
+            return
+        sig = self.path + ".sig"
+        if not os.path.isfile(sig):
+            raise Fehler(f"{self.path}: Signatur fehlt (Schluessel sind eingerichtet)")
+        for k in keys:
+            r = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", k, "-rawin",
+                                "-in", self.path, "-sigfile", sig],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if r.returncode == 0:
+                return
+        raise Fehler(f"{self.path}: Signatur ungueltig")
+
+    def verify_content(self):
+        files = os.path.join(self.dir, "files")
+        listed = set()
+        for e in self.m.get("file", []):
+            rel = safe_rel(e["path"])
+            listed.add(rel)
+            p = os.path.join(files, rel)
+            t = e["type"]
+            if t == "file":
+                ok = os.path.isfile(p) and not os.path.islink(p) and sha256_file(p) == e["sha256"]
+            elif t == "symlink":
+                ok = os.path.islink(p) and os.readlink(p) == e["target"]
+            elif t == "dir":
+                ok = os.path.isdir(p) and not os.path.islink(p)
+            else:
+                ok = False
+            if not ok:
+                raise Fehler(f"{self.path}: /{rel} passt nicht zum Manifest")
+        if os.path.isdir(files):
+            for d, dirs, fs in os.walk(files):
+                for n in dirs + fs:
+                    rel = os.path.relpath(os.path.join(d, n), files)
+                    if rel not in listed:
+                        raise Fehler(f"{self.path}: /{rel} steht nicht im Manifest")
+        inst = os.path.join(self.dir, "install")
+        if "install_sha256" in self.m:
+            if not os.path.isfile(inst) or sha256_file(inst) != self.m["install_sha256"]:
+                raise Fehler(f"{self.path}: Install-Skript passt nicht zum Manifest")
+        elif os.path.lexists(inst):
+            raise Fehler(f"{self.path}: Install-Skript ohne Eintrag im Manifest")
+
+
+def sh(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def safe_rel(path):
+    rel = path.lstrip("/")
+    parts = rel.split("/")
+    if not rel or any(p in ("", ".", "..") for p in parts):
+        raise Fehler(f"unsicherer Pfad im Paket: {path}")
+    return rel
+
+
+# ---------------------------------------------------------------- Datenbank
+
+class System:
+    def __init__(self, root, extra_keys=()):
+        self.root = os.path.abspath(root)
+        self.db = os.path.join(self.root, DB, "installed")
+        self.keys = list(extra_keys)
+        kd = os.path.join(self.root, KEYS)
+        if os.path.isdir(kd):
+            self.keys += sorted(os.path.join(kd, k) for k in os.listdir(kd) if k.endswith(".pem"))
+        self._installed = None
+        self.lockfd = None
+
+    def lock(self):
+        os.makedirs(self.db, exist_ok=True)
+        self.lockfd = open(os.path.join(self.root, DB, "lock"), "w")
+        try:
+            fcntl.flock(self.lockfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Fehler("ein anderer vpkg-Vorgang laeuft gerade")
+
+    @property
+    def installed(self):
+        if self._installed is None:
+            self._installed = {}
+            if os.path.isdir(self.db):
+                for n in sorted(os.listdir(self.db)):
+                    mf = os.path.join(self.db, n, "manifest.toml")
+                    if os.path.isfile(mf):
+                        with open(mf, "rb") as f:
+                            self._installed[n] = tomllib.load(f)
+        return self._installed
+
+    def owners(self, exclude=()):
+        """Pfad -> Paketname, fuer alle Dateien und Links (ohne Verzeichnisse)."""
+        own = {}
+        for n, m in self.installed.items():
+            if n in exclude:
+                continue
+            for e in m.get("file", []):
+                if e["type"] != "dir":
+                    own[e["path"].lstrip("/")] = n
+        return own
+
+    def dir_owners(self, exclude=()):
+        own = {}
+        for n, m in self.installed.items():
+            if n in exclude:
+                continue
+            for e in m.get("file", []):
+                if e["type"] == "dir":
+                    own.setdefault(e["path"].lstrip("/"), set()).add(n)
+        return own
+
+    def write_entry(self, pkg):
+        d = os.path.join(self.db, pkg.name)
+        tmp = d + ".neu"
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(tmp)
+        shutil.copy(os.path.join(pkg.dir, "manifest.toml"), tmp)
+        if os.path.isfile(os.path.join(pkg.dir, "install")):
+            shutil.copy(os.path.join(pkg.dir, "install"), tmp)
+        shutil.rmtree(d, ignore_errors=True)
+        os.rename(tmp, d)
+        self.installed[pkg.name] = pkg.m
+
+    def drop_entry(self, name):
+        shutil.rmtree(os.path.join(self.db, name), ignore_errors=True)
+        self.installed.pop(name, None)
+
+    def path(self, rel):
+        return os.path.join(self.root, rel)
+
+    def inside(self, p):
+        """Pfad liegt (nach Aufloesen von Links) im Zielsystem?"""
+        r = os.path.realpath(self.root)
+        q = os.path.realpath(p)
+        return r == "/" or q == r or q.startswith(r + "/")
+
+    def run_in_root(self, argv, what):
+        env = {"PATH": "/usr/bin:/usr/sbin", "HOME": "/root", "LC_ALL": "C", "TERM": "dumb"}
+        if self.root == "/":
+            cmd = argv
+        elif os.geteuid() == 0:
+            cmd = ["chroot", self.root] + argv
+        else:
+            raise Fehler(f"{what}: ausserhalb von / nur als root moeglich (oder --no-scripts)")
+        r = subprocess.run(cmd, env=env)
+        if r.returncode != 0:
+            raise Fehler(f"{what} fehlgeschlagen (Rueckgabewert {r.returncode})")
+
+
+def provides_map(pkgs):
+    """Name -> Paketname fuer Namen und provides."""
+    out = {}
+    for n, m in pkgs.items():
+        out.setdefault(n, n)
+        for p in m.get("provides", []):
+            out.setdefault(p, n)
+    return out
+
+
+# ---------------------------------------------------------------- Repository
+
+class Repo:
+    def __init__(self, src, tmp):
+        self.src = src.rstrip("/")
+        self.remote = urllib.parse.urlparse(self.src).scheme in ("http", "https")
+        self.tmp = tmp
+        idx = self.fetch("index.toml")
+        with open(idx, "rb") as f:
+            data = tomllib.load(f)
+        self.pkgs = {p["name"]: p for p in data.get("package", [])}
+
+    def fetch(self, name, optional=False):
+        if not self.remote:
+            p = os.path.join(self.src, name)
+            if not os.path.isfile(p):
+                if optional:
+                    return None
+                raise Fehler(f"im Repository fehlt {name}")
+            return p
+        out = os.path.join(self.tmp, "dl-" + name)
+        try:
+            with urllib.request.urlopen(f"{self.src}/{urllib.parse.quote(name)}", timeout=60) as r, \
+                    open(out, "wb") as f:
+                shutil.copyfileobj(r, f)
+        except Exception as e:  # noqa: BLE001 - jede Netzwerkursache gleich melden
+            if optional:
+                return None
+            raise Fehler(f"Download fehlgeschlagen: {name} ({e})")
+        return out
+
+    def get(self, name):
+        e = self.pkgs[name]
+        path = self.fetch(e["filename"])
+        if sha256_file(path) != e["sha256"]:
+            raise Fehler(f"{e['filename']}: SHA-256 passt nicht zum Repository-Index")
+        sig = self.fetch(e["filename"] + ".sig", optional=True)
+        if sig and self.remote:
+            os.replace(sig, path + ".sig")
+        return path
+
+
+def repo_source(args, system):
+    if args.repo:
+        return args.repo
+    f = system.path(REPO_FILE)
+    if os.path.isfile(f):
+        for line in open(f):
+            line = line.strip()
+            if line and not line.startswith("#"):
+                return line
+    return None
+
+
+def cmd_index(args):
+    d = args.dir
+    entries = []
+    for fn in sorted(os.listdir(d)):
+        if not fn.endswith(".vpkg"):
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = Paket(os.path.join(d, fn), tmp, [])
+            m = pkg.m
+            entries.append((m, fn, sha256_file(os.path.join(d, fn))))
+    names = [m["name"] for m, _, _ in entries]
+    dup = {n for n in names if names.count(n) > 1}
+    if dup:
+        raise Fehler("mehrere Versionen im selben Repository: " + ", ".join(sorted(dup)))
+    with open(os.path.join(d, "index.toml.neu"), "w") as f:
+        f.write("# VPKG-Repository-Index (erzeugt von vpkg index)\nformat = 1\n")
+        for m, fn, sha in entries:
+            f.write("\n[[package]]\n")
+            f.write(f"name = {toml_str(m['name'])}\n")
+            f.write(f"version = {toml_str(m['version'])}\n")
+            f.write(f"release = {m.get('release', 1)}\n")
+            f.write(f"description = {toml_str(m.get('description', ''))}\n")
+            for k in ("depends", "provides", "conflicts"):
+                f.write(f"{k} = [{', '.join(toml_str(x) for x in m.get(k, []))}]\n")
+            f.write(f"filename = {toml_str(fn)}\nsha256 = {toml_str(sha)}\n")
+    os.replace(os.path.join(d, "index.toml.neu"), os.path.join(d, "index.toml"))
+    info(f"index.toml: {len(entries)} Pakete")
+
+
+# ---------------------------------------------------------------- Installieren
+
+def resolve(system, wanted, repo, tmp, no_deps):
+    """Liefert die zu installierenden Pakete (Paket-Objekte), Abhaengigkeiten zuerst."""
+    chosen = {}          # Name -> Paket
+
+    def load(path):
+        p = Paket(path, tmp, system.keys)
+        if p.name in chosen:
+            raise Fehler(f"{p.name} ist doppelt angegeben")
+        chosen[p.name] = p
+
+    for w in wanted:
+        if w.endswith(".vpkg") or os.sep in w:
+            if not os.path.isfile(w):
+                raise Fehler(f"Datei nicht gefunden: {w}")
+            load(os.path.abspath(w))
+        else:
+            if repo is None:
+                raise Fehler(f"{w}: kein Repository angegeben (--repo oder {REPO_FILE})")
+            if w not in repo.pkgs:
+                raise Fehler(f"{w}: nicht im Repository")
+            load(repo.get(w))
+
+    # Fehlende Abhaengigkeiten aus dem Repository nachladen.
+    while True:
+        have = provides_map({**system.installed, **{n: p.m for n, p in chosen.items()}})
+        missing = sorted({d for p in chosen.values() for d in p.m.get("depends", []) if d not in have})
+        if not missing or no_deps:
+            break
+        repo_have = provides_map(repo.pkgs) if repo else {}
+        unresolved = [d for d in missing if d not in repo_have]
+        if unresolved:
+            raise Fehler("fehlende Abhaengigkeiten: " + ", ".join(unresolved))
+        for d in missing:
+            n = repo_have[d]
+            if n not in chosen:
+                info(f"   + {n} (Abhaengigkeit)")
+                load(repo.get(n))
+
+    # Konflikte
+    after = {**system.installed, **{n: p.m for n, p in chosen.items()}}
+    for n, m in after.items():
+        for c in m.get("conflicts", []):
+            other = provides_map({k: v for k, v in after.items() if k != n}).get(c)
+            if other and (n in chosen or other in chosen):
+                raise Fehler(f"{n} steht im Konflikt mit {other}")
+
+    # Reihenfolge: Abhaengigkeiten zuerst (innerhalb dieser Installation).
+    have = provides_map({n: p.m for n, p in chosen.items()})
+    order, state = [], {}
+
+    def visit(n):
+        if state.get(n) == 2:
+            return
+        if state.get(n) == 1:
+            return  # Kreis: Reihenfolge innerhalb des Kreises ist egal
+        state[n] = 1
+        for d in chosen[n].m.get("depends", []):
+            if d in have:
+                visit(have[d])
+        state[n] = 2
+        order.append(chosen[n])
+
+    for n in sorted(chosen):
+        visit(n)
+    return order
+
+
+def file_conflicts(system, pkgs, overwrite):
+    names = {p.name for p in pkgs}
+    owners = system.owners(exclude=names)
+    claimed = {}
+    problems = []
+    for p in pkgs:
+        old = {e["path"].lstrip("/") for e in system.installed.get(p.name, {}).get("file", [])
+               if e["type"] != "dir"}
+        for e in p.m.get("file", []):
+            rel = e["path"].lstrip("/")
+            dst = system.path(rel)
+            if e["type"] == "dir":
+                if os.path.lexists(dst) and not os.path.isdir(dst):
+                    problems.append(f"/{rel} ist im System kein Verzeichnis ({p.name})")
+                continue
+            if rel in claimed:
+                problems.append(f"/{rel} kommt in {claimed[rel]} und {p.name} vor")
+            claimed[rel] = p.name
+            if rel in owners:
+                if not overwrite:
+                    problems.append(f"/{rel} gehoert schon zu {owners[rel]} ({p.name})")
+            elif os.path.lexists(dst) and rel not in old:
+                if os.path.isdir(dst) and not os.path.islink(dst):
+                    problems.append(f"/{rel} ist im System ein Verzeichnis ({p.name})")
+                elif not overwrite:
+                    problems.append(f"/{rel} existiert schon und gehoert keinem Paket ({p.name})")
+    if problems:
+        raise Fehler("Dateikonflikte:\n  " + "\n  ".join(problems[:30])
+                     + ("\n  ..." if len(problems) > 30 else "")
+                     + "\n(--overwrite ueberschreibt sie)")
+
+
+def is_config(rel):
+    return rel.startswith("etc/")
+
+
+def place(system, pkg):
+    """Kopiert die Dateien eines Pakets ins System; liefert die Pfade der alten Version,
+    die in der neuen fehlen."""
+    old = system.installed.get(pkg.name)
+    old_files = {e["path"].lstrip("/"): e for e in old.get("file", [])} if old else {}
+    src_root = os.path.join(pkg.dir, "files")
+    new_paths = set()
+    for e in pkg.m.get("file", []):
+        rel = safe_rel(e["path"])
+        new_paths.add(rel)
+        dst = system.path(rel)
+        if not system.inside(os.path.dirname(dst)):
+            raise Fehler(f"/{rel}: Zielverzeichnis zeigt aus dem System heraus")
+        t = e["type"]
+        if t == "dir":
+            if not os.path.lexists(dst):
+                os.mkdir(dst)
+                os.chmod(dst, int(e["mode"], 8))
+            continue
+        src = os.path.join(src_root, rel)
+        if t == "file" and is_config(rel) and os.path.isfile(dst) and not os.path.islink(dst):
+            cur = sha256_file(dst)
+            prev = old_files.get(rel, {}).get("sha256")
+            if cur != e["sha256"] and prev is not None and cur != prev:
+                # Vom Nutzer geaenderte Konfiguration bleibt; die neue kommt daneben.
+                shutil.copyfile(src, dst + ".vpkgnew")
+                os.chmod(dst + ".vpkgnew", int(e["mode"], 8))
+                warn(f"/{rel} wurde geaendert und bleibt; neue Fassung: /{rel}.vpkgnew")
+                continue
+        tmp = os.path.join(os.path.dirname(dst), f".vpkg-{os.getpid()}-{os.path.basename(dst)}")
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        if t == "file":
+            shutil.copyfile(src, tmp)
+            os.chmod(tmp, int(e["mode"], 8))
+        else:
+            os.symlink(e["target"], tmp)
+        os.replace(tmp, dst)
+    return [p for p, e in old_files.items() if p not in new_paths]
+
+
+def remove_paths(system, name, paths, keep_owned_by_others=True):
+    """Entfernt Dateien/Links; leere Verzeichnisse danach nur, wenn sie niemand sonst nutzt."""
+    owners = system.owners(exclude={name})
+    downers = system.dir_owners(exclude={name})
+    entries = {e["path"].lstrip("/"): e for e in system.installed[name].get("file", [])}
+    dirs = []
+    for rel in paths:
+        e = entries.get(rel)
+        if e is None:
+            continue
+        if e["type"] == "dir":
+            dirs.append(rel)
+            continue
+        if keep_owned_by_others and rel in owners:
+            continue
+        dst = system.path(rel)
+        if not os.path.lexists(dst):
+            continue
+        if e["type"] == "file" and is_config(rel) and not os.path.islink(dst) \
+                and os.path.isfile(dst) and sha256_file(dst) != e["sha256"]:
+            os.replace(dst, dst + ".vpkgsave")
+            warn(f"/{rel} war geaendert und bleibt als /{rel}.vpkgsave")
+            continue
+        if os.path.isdir(dst) and not os.path.islink(dst):
+            continue
+        os.unlink(dst)
+    for rel in sorted(dirs, reverse=True):
+        if rel in downers:
+            continue
+        dst = system.path(rel)
+        if os.path.isdir(dst) and not os.path.islink(dst):
+            try:
+                os.rmdir(dst)
+            except OSError:
+                pass  # nicht leer: enthaelt fremde oder neue Dateien
+
+
+def ldconfig(system):
+    if system.root == "/":
+        subprocess.run(["ldconfig"], check=False)
+    elif os.geteuid() == 0 and os.path.exists(system.path("usr/sbin/ldconfig")):
+        subprocess.run(["chroot", system.root, "/usr/sbin/ldconfig"], check=False)
+
+
+def run_install_script(system, name):
+    inst = f"/{DB}/installed/{name}/install"
+    if not os.path.isfile(system.path(inst.lstrip("/"))):
+        return
+    info(f"   Install-Skript von {name}")
+    system.run_in_root(["/bin/bash", "-c", 'set -e; . "$1"; post_install', "vpkg", inst],
+                       f"Install-Skript von {name}")
+
+
+def cmd_install(args, system, upgrade_only=False):
+    system.lock()
+    with tempfile.TemporaryDirectory(prefix="vpkg.") as tmp:
+        src = repo_source(args, system)
+        repo = Repo(src, tmp) if src else None
+        wanted = args.packages
+        if upgrade_only:
+            if repo is None:
+                raise Fehler(f"upgrade braucht ein Repository (--repo oder {REPO_FILE})")
+            wanted = [n for n, m in system.installed.items()
+                      if n in repo.pkgs and vercmp(fullver(repo.pkgs[n]), fullver(m)) > 0]
+            if not wanted:
+                info("Alles aktuell.")
+                return 0
+        pkgs = resolve(system, wanted, repo, tmp, args.no_deps)
+        file_conflicts(system, pkgs, args.overwrite)
+        for p in pkgs:
+            old = system.installed.get(p.name)
+            if old is None:
+                what = f"installiere {p.name} {fullver(p.m)}"
+            else:
+                c = vercmp(fullver(p.m), fullver(old))
+                what = {1: "aktualisiere", 0: "installiere neu", -1: "stufe zurueck"}[c]
+                what = f"{what} {p.name} {fullver(old)} -> {fullver(p.m)}"
+            info(f">> {what}")
+            stale = place(system, p)
+            if old is not None:
+                remove_paths(system, p.name, stale)
+            system.write_entry(p)
+        ldconfig(system)
+        if not args.no_scripts:
+            for p in pkgs:
+                run_install_script(system, p.name)
+        info(f"Fertig: {len(pkgs)} Paket(e).")
+    return 0
+
+
+# ---------------------------------------------------------------- Entfernen
+
+def cmd_remove(args, system):
+    system.lock()
+    names = []
+    for n in args.names:
+        if n not in system.installed:
+            raise Fehler(f"{n} ist nicht installiert")
+        names.append(n)
+    if not args.no_deps:
+        rest = {n: m for n, m in system.installed.items() if n not in names}
+        have = provides_map(rest)
+        needed = []
+        for n, m in rest.items():
+            for d in m.get("depends", []):
+                if d not in have:
+                    needed.append(f"{n} braucht {d}")
+        if needed:
+            raise Fehler("wird noch gebraucht:\n  " + "\n  ".join(sorted(needed))
+                         + "\n(--no-deps entfernt trotzdem)")
+    for n in names:
+        info(f">> entferne {n} {fullver(system.installed[n])}")
+        paths = [e["path"].lstrip("/") for e in system.installed[n].get("file", [])]
+        remove_paths(system, n, paths)
+        system.drop_entry(n)
+    ldconfig(system)
+    info(f"Fertig: {len(names)} Paket(e) entfernt.")
+    return 0
+
+
+# ---------------------------------------------------------------- Abfragen
+
+def cmd_list(args, system):
+    for n, m in system.installed.items():
+        print(f"{n} {fullver(m)}")
+    return 0
+
+
+def need(system, name):
+    if name not in system.installed:
+        raise Fehler(f"{name} ist nicht installiert")
+    return system.installed[name]
+
+
+def cmd_info(args, system):
+    m = need(system, args.name)
+    rdeps = sorted(n for n, o in system.installed.items()
+                   if any(provides_map({args.name: m}).get(d) for d in o.get("depends", [])))
+    rows = [("Name", m["name"]), ("Version", fullver(m)), ("Beschreibung", m.get("description", "")),
+            ("Lizenz", m.get("license", "")), ("Adresse", m.get("url", "")),
+            ("Haengt ab von", ", ".join(m.get("depends", [])) or "-"),
+            ("Stellt bereit", ", ".join(m.get("provides", [])) or "-"),
+            ("Konflikte", ", ".join(m.get("conflicts", [])) or "-"),
+            ("Gebraucht von", ", ".join(rdeps) or "-"),
+            ("Dateien", str(sum(1 for e in m.get("file", []) if e["type"] != "dir"))),
+            ("Install-Skript", "ja" if "install_sha256" in m else "nein"),
+            ("Rezept-SHA-256", m.get("recipe_sha256", ""))]
+    for k, v in rows:
+        print(f"{k:<16}: {v}")
+    return 0
+
+
+def cmd_files(args, system):
+    for e in need(system, args.name).get("file", []):
+        print(e["path"] + ("/" if e["type"] == "dir" else ""))
+    return 0
+
+
+def cmd_owner(args, system):
+    p = os.path.abspath(args.path) if system.root == "/" else "/" + args.path.lstrip("/")
+    rel = os.path.normpath(p).lstrip("/")
+    hits = [n for n, m in system.installed.items()
+            if any(e["path"].lstrip("/") == rel for e in m.get("file", []))]
+    if not hits:
+        print(f"/{rel} gehoert zu keinem Paket", file=sys.stderr)
+        return 1
+    for n in hits:
+        print(f"/{rel} gehoert zu {n} {fullver(system.installed[n])}")
+    return 0
+
+
+def check_package(system, name, m):
+    """Liefert (Fehler, geaenderte Konfigurationsdateien)."""
+    errs, conf = [], []
+    for e in m.get("file", []):
+        rel = e["path"].lstrip("/")
+        dst = system.path(rel)
+        t = e["type"]
+        if t == "dir":
+            if not os.path.isdir(dst):
+                errs.append(f"{name}: Verzeichnis fehlt: /{rel}")
+        elif t == "symlink":
+            if not os.path.islink(dst) or os.readlink(dst) != e["target"]:
+                errs.append(f"{name}: Link fehlt oder zeigt woanders hin: /{rel}")
+        elif not os.path.isfile(dst) or os.path.islink(dst):
+            errs.append(f"{name}: Datei fehlt: /{rel}")
+        elif sha256_file(dst) != e["sha256"]:
+            (conf if is_config(rel) else errs).append(f"{name}: Inhalt geaendert: /{rel}")
+    return errs, conf
+
+
+def cmd_check(args, system):
+    names = args.names or list(system.installed)
+    errs, conf = [], []
+    for n in names:
+        e, c = check_package(system, n, need(system, n))
+        errs += e
+        conf += c
+    have = provides_map(system.installed)
+    for n in names:
+        for d in system.installed[n].get("depends", []):
+            if d not in have:
+                errs.append(f"{n}: Abhaengigkeit fehlt: {d}")
+    own = {}
+    for n, m in system.installed.items():
+        for e in m.get("file", []):
+            if e["type"] != "dir":
+                own.setdefault(e["path"], []).append(n)
+    for p, ns in sorted(own.items()):
+        if len(ns) > 1 and set(ns) & set(names):
+            errs.append(f"{p} gehoert zu mehreren Paketen: {', '.join(ns)}")
+    for c in conf:
+        print(f"Konfiguration: {c}")
+    for e in errs:
+        print(f"FEHLER: {e}")
+    print(f"{len(names)} Paket(e) geprueft: {len(errs)} Fehler, {len(conf)} geaenderte Konfigurationsdateien")
+    return 1 if errs else 0
+
+
+def cmd_register(args, system):
+    """Traegt Pakete ein, deren Dateien schon im System liegen (z. B. beim Bau des
+    Basissystems). Abweichungen werden gemeldet, aber nicht korrigiert."""
+    system.lock()
+    total = 0
+    with tempfile.TemporaryDirectory(prefix="vpkg.") as tmp:
+        for path in args.packages:
+            p = Paket(os.path.abspath(path), tmp, system.keys)
+            errs, conf = check_package(system, p.name, p.m)
+            for e in errs:
+                warn(e)
+            total += len(errs)
+            system.write_entry(p)
+            shutil.rmtree(p.dir)
+            info(f"eingetragen: {p.name} {fullver(p.m)}"
+                 + (f" ({len(errs)} Abweichungen)" if errs else ""))
+    info(f"Fertig: {len(args.packages)} Paket(e) eingetragen, {total} Abweichungen.")
+    return 1 if total and args.strict else 0
+
+
+# ---------------------------------------------------------------- Aufruf
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="vpkg", description=f"VPKG {VERSION}: Paketverwaltung von Veyra OS")
+    ap.add_argument("--root", default="/", help="Zielsystem (Standard: /)")
+    ap.add_argument("--pubkey", action="append", default=[], help="zusaetzlicher oeffentlicher Schluessel")
+    ap.add_argument("--version", action="version", version=f"vpkg {VERSION}")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def inst_opts(p):
+        p.add_argument("--repo", help="Verzeichnis oder http(s)-Adresse mit index.toml")
+        p.add_argument("--overwrite", action="store_true", help="Dateikonflikte ueberschreiben")
+        p.add_argument("--no-deps", action="store_true", help="Abhaengigkeiten nicht pruefen")
+        p.add_argument("--no-scripts", action="store_true", help="Install-Skripte nicht ausfuehren")
+
+    p = sub.add_parser("install", help="Pakete installieren oder aktualisieren")
+    inst_opts(p)
+    p.add_argument("packages", nargs="+")
+    p = sub.add_parser("upgrade", help="alle Pakete aus dem Repository aktualisieren")
+    inst_opts(p)
+    p = sub.add_parser("remove", help="Pakete entfernen")
+    p.add_argument("--no-deps", action="store_true")
+    p.add_argument("names", nargs="+")
+    sub.add_parser("list", help="installierte Pakete")
+    p = sub.add_parser("info", help="Angaben zu einem Paket")
+    p.add_argument("name")
+    p = sub.add_parser("files", help="Dateien eines Pakets")
+    p.add_argument("name")
+    p = sub.add_parser("owner", help="zu welchem Paket gehoert eine Datei")
+    p.add_argument("path")
+    p = sub.add_parser("check", help="installierte Dateien pruefen")
+    p.add_argument("names", nargs="*")
+    p = sub.add_parser("register", help="schon ausgepackte Pakete eintragen")
+    p.add_argument("--strict", action="store_true", help="Abweichungen als Fehler werten")
+    p.add_argument("packages", nargs="+")
+    p = sub.add_parser("index", help="index.toml fuer ein Repository-Verzeichnis schreiben")
+    p.add_argument("dir")
+    args = ap.parse_args(argv)
+
+    try:
+        if args.cmd == "index":
+            cmd_index(args)
+            return 0
+        system = System(args.root, args.pubkey)
+        if args.cmd == "install":
+            return cmd_install(args, system)
+        if args.cmd == "upgrade":
+            args.packages = []
+            return cmd_install(args, system, upgrade_only=True)
+        return {"remove": cmd_remove, "list": cmd_list, "info": cmd_info, "files": cmd_files,
+                "owner": cmd_owner, "check": cmd_check, "register": cmd_register}[args.cmd](args, system)
+    except Fehler as e:
+        print(f"vpkg: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

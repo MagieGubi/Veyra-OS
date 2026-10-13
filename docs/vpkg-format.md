@@ -10,6 +10,7 @@ Stand: Core 0.1. Dieses Format erzeugt `vpkg-build` schon heute; das spätere VP
 ```
 manifest.toml     Metadaten und Dateiliste
 files/            Dateien, so wie sie ab / installiert werden
+install           nur wenn das Rezept post_install() hat (siehe unten)
 ```
 
 Das Archiv ist reproduzierbar: Einträge sortiert, Besitzer 0:0, alle Zeitstempel =
@@ -36,6 +37,7 @@ conflicts = []
 provides = []
 recipe_sha256 = "..." # Hash von recipe.sh = Herkunftsnachweis
 build_date = 0        # SOURCE_DATE_EPOCH
+install_sha256 = "..." # nur mit Install-Skript: SHA-256 der Datei install
 
 [[source]]            # je Quellarchiv
 url = "..."
@@ -90,18 +92,22 @@ package() {          # alles nach $pkgdir installieren
 `vpkg-verify` ist vorerst ein Werkzeug für den Build-Host (braucht Python 3.11+).
 Auf dem Zielsystem übernimmt das später VPKG selbst.
 
-## Noch nicht enthalten
-
-Installieren, Entfernen, Abhängigkeitsauflösung, Konflikterkennung, Transaktionen und
-Repository-Index kommen mit VPKG 0.1. VPKG 0.1 wird nicht atomar sein (siehe
-docs/architecture.md).
+`usr/share/info/dir` wird nie mit verpackt: install-info schreibt die Datei in jedem
+Paket neu, sie würde sonst zwischen Paketen kollidieren.
 
 ## Optionale Funktion post_install()
 
 Ein Rezept darf `post_install()` definieren. Sie läuft nach dem Auspacken im Zielsystem,
 für Schritte, die den Zustand des Systems ändern und keiner Datei im Paket entsprechen
-(zum Beispiel Locales erzeugen oder `pwconv`). Beim Bau des Basissystems ruft
-`stage4/chroot/30-packages.sh` sie auf; VPKG 0.1 übernimmt das später beim Installieren.
+(zum Beispiel Locales erzeugen oder `pwconv`). `vpkg-build` legt sie als Datei `install`
+ins Paket (Variablen `pkgname`, `pkgver`, `pkgrel` plus die Funktion) und trägt ihren
+SHA-256 als `install_sha256` ins Manifest ein; `vpkg-verify` und VPKG lehnen ein Paket ab,
+dessen Skript nicht dazu passt. VPKG führt sie nach dem Installieren aus, bei `--root` per
+`chroot`. Beim Bau des Basissystems ruft `stage4/chroot/30-packages.sh` sie direkt auf.
+
+## Installieren: VPKG 0.1
+
+Die Bedienung von `vpkg` steht in [vpkg.md](vpkg.md).
 
 ## Basissystem (Stufe 4b)
 
