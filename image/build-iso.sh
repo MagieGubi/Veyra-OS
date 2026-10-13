@@ -18,7 +18,7 @@ set -euo pipefail
 img=$1 kdir=$2 iso=$3
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1767225600}
 
-kernel=$(ls "$kdir"/vmlinuz-live-*)
+kernel=$(find "$kdir" -maxdepth 1 -name 'vmlinuz-live-*')
 work=$(mktemp -d)
 loop=""
 cleanup() {

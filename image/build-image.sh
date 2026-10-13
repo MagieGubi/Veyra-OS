@@ -36,7 +36,7 @@ zstd -q -dc "$system" | tar -xpf - -C "$work" --numeric-owner
 rm -rf "$root/var/lib/veyra-stage"
 
 echo ">> Kernelmodule und Zusatzpakete"
-kernel=$(ls "$kdir"/vmlinuz-*)
+kernel=$(find "$kdir" -maxdepth 1 -name 'vmlinuz-*' ! -name 'vmlinuz-live-*')
 kver=${kernel##*/vmlinuz-}
 zstd -q -dc "$kdir/modules-$kver.tar.zst" | tar -xpf - -C "$root" --keep-directory-symlink
 # Paketschluessel zuerst: danach verlangt VPKG fuer jedes weitere Paket eine gueltige
