@@ -101,6 +101,15 @@ class Paket:
                            shell=True, stderr=subprocess.PIPE, text=True)
         if p.returncode != 0:
             raise Fehler(f"{path}: Archiv beschaedigt ({p.stderr.strip()})")
+        # Die ausgepackte Kopie muss lesbar sein (z. B. Modus 4710 ohne root-Rechte);
+        # die Rechte im Zielsystem kommen ohnehin aus dem Manifest.
+        for d, dirs, fs in os.walk(self.dir):
+            for n in dirs:
+                os.chmod(os.path.join(d, n), 0o700)
+            for n in fs:
+                q = os.path.join(d, n)
+                if not os.path.islink(q):
+                    os.chmod(q, 0o600)
         mf = os.path.join(self.dir, "manifest.toml")
         if not os.path.isfile(mf):
             raise Fehler(f"{path}: manifest.toml fehlt")

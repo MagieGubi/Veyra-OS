@@ -152,4 +152,16 @@ python3 "$here/packages/base/vpkg/vpkg" --root "$t/reg" register --strict "$P/li
 python3 "$here/packages/base/vpkg/vpkg" --root "$t/reg" check >/dev/null || fail "register + check"
 ok "register traegt ausgepackte Pakete ein"
 
+mkdir -p "$t/r/geheim"
+cat > "$t/r/geheim/recipe.sh" <<'RCP'
+pkgname=geheim pkgver=1 license=MIT
+package() { install -d "$pkgdir/usr/libexec"; echo x > "$pkgdir/usr/libexec/helfer"; chmod 4710 "$pkgdir/usr/libexec/helfer"; }
+RCP
+"$build" --srcdir "$t" --outdir "$P" "$t/r/geheim" >/dev/null
+mkdir "$t/repo2" && cp "$P/geheim-1-1-x86_64.vpkg" "$t/repo2/"
+python3 "$here/packages/base/vpkg/vpkg" index "$t/repo2" >/dev/null || fail "index mit Modus 4710"
+vpkg install "$P/geheim-1-1-x86_64.vpkg" >/dev/null || fail "Installation mit Modus 4710"
+[ "$(stat -c %a "$root/usr/libexec/helfer")" = 4710 ] || fail "Modus 4710 nicht uebernommen"
+ok "Dateien mit eingeschraenkten Rechten (4710) lassen sich pruefen und installieren"
+
 echo "Alle $n VPKG-0.1-Tests bestanden."
