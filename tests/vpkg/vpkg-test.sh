@@ -49,7 +49,8 @@ if vpkg install "$P/app-1.0-1-x86_64.vpkg" 2>/dev/null; then fail "app ohne liba
 ok "fehlende Abhaengigkeit wird abgelehnt"
 
 vpkg install "$P/app-1.0-1-x86_64.vpkg" "$P/liba-1.0-1-x86_64.vpkg" >/dev/null
-[ "$(cat "$root/usr/bin/app")" = app1 ] && [ "$(cat "$root/usr/lib/liba.txt")" = a1 ] || fail "Dateien fehlen"
+[ "$(cat "$root/usr/bin/app")" = app1 ] || fail "Datei von app fehlt"
+[ "$(cat "$root/usr/lib/liba.txt")" = a1 ] || fail "Datei von liba fehlt"
 [ "$(vpkg list | tr '\n' ' ')" = "app 1.0-1 liba 1.0-1 " ] || fail "list stimmt nicht: $(vpkg list)"
 vpkg owner /usr/lib/liba.txt | grep -q 'gehoert zu liba' || fail "owner"
 vpkg check >/dev/null || fail "check nach Installation"
@@ -77,7 +78,8 @@ ok "fremde Datei nur mit --overwrite ersetzt"
 echo "meine Einstellung" > "$root/etc/app.conf"
 vpkg install "$P/app-2.0-1-x86_64.vpkg" >/dev/null 2>&1
 [ "$(cat "$root/usr/bin/app")" = app2 ] || fail "Update nicht ausgepackt"
-[ ! -e "$root/usr/share/app/alt.txt" ] && [ ! -e "$root/usr/share/app" ] || fail "alte Datei nach Update noch da"
+[ ! -e "$root/usr/share/app/alt.txt" ] || fail "alte Datei nach Update noch da"
+[ ! -e "$root/usr/share/app" ] || fail "leeres altes Verzeichnis nach Update noch da"
 [ "$(cat "$root/etc/app.conf")" = "meine Einstellung" ] || fail "geaenderte Konfiguration ueberschrieben"
 [ "$(cat "$root/etc/app.conf.vpkgnew")" = conf2 ] || fail ".vpkgnew fehlt"
 vpkg list | grep -qx 'app 2.0-1' || fail "Version nach Update"
@@ -91,7 +93,8 @@ ok "check erkennt veraenderte Dateien, Neuinstallation repariert"
 
 vpkg remove app liba >/dev/null 2>&1
 [ -z "$(vpkg list)" ] || fail "Pakete noch eingetragen"
-[ ! -e "$root/usr/bin/app" ] && [ ! -e "$root/usr/lib/liba.txt" ] || fail "Dateien nach remove noch da"
+[ ! -e "$root/usr/bin/app" ] || fail "Datei von app nach remove noch da"
+[ ! -e "$root/usr/lib/liba.txt" ] || fail "Datei von liba nach remove noch da"
 [ "$(cat "$root/etc/app.conf.vpkgsave")" = "meine Einstellung" ] || fail "geaenderte Konfiguration nicht gesichert"
 [ ! -e "$root/usr/lib" ] || fail "leeres Verzeichnis bleibt"
 ok "Entfernen raeumt Dateien und leere Verzeichnisse auf, sichert Konfiguration"
