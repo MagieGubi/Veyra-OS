@@ -31,6 +31,7 @@ jobs:
           for o in stage4/order-*.list; do
             build/scripts/gen-sources-list.sh "$o" packages/core stage4/lfs-12.4-md5sums > /dev/null
           done
+          build/scripts/check-pinned.sh
 
   toolchain:
     name: Cross-Toolchain (Stufe 2)
