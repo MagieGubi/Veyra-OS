@@ -5,10 +5,16 @@
 # Mit SELFTEST=1 wird danach zusaetzlich auf "VEYRA-SELBSTTEST: OK" gewartet
 # (Paket veyra-selftest im Abbild); "VEYRA-SELBSTTEST: FEHLER" ist ein Fehlschlag.
 #
-# Aufruf: [SELFTEST=1] image/boot-test.sh ABBILD.img LOG [SEKUNDEN]
+# Aufruf: [SELFTEST=1] [MEDIUM=cdrom] image/boot-test.sh ABBILD.img LOG [SEKUNDEN]
 set -euo pipefail
 img=$1 log=$2 limit=${3:-600}
 selftest=${SELFTEST:-0}
+# MEDIUM=cdrom: Abbild als CD einlegen (Live-ISO, SATA-CD-Laufwerk wie in VirtualBox)
+if [ "${MEDIUM:-disk}" = cdrom ]; then
+  drive=(-drive "file=$img,format=raw,media=cdrom,readonly=on")
+else
+  drive=(-drive "file=$img,format=raw,if=virtio,snapshot=on")
+fi
 ovmf=/usr/share/OVMF/OVMF_CODE_4M.fd
 [ -f "$ovmf" ] || { echo "OVMF nicht gefunden: $ovmf" >&2; exit 1; }
 vars=$(mktemp)
@@ -21,7 +27,7 @@ start=$(date +%s.%N)
 qemu-system-x86_64 -machine q35,accel=$accel -m 2048 -smp 2 \
   -drive if=pflash,format=raw,readonly=on,file="$ovmf" \
   -drive if=pflash,format=raw,file="$vars" \
-  -drive file="$img",format=raw,if=virtio,snapshot=on \
+  "${drive[@]}" \
   -nographic -serial file:"$log" -monitor none -no-reboot &
 qemu=$!
 trap 'kill $qemu 2>/dev/null || true; rm -f "$vars"' EXIT

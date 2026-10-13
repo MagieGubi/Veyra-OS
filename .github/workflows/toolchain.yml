@@ -553,3 +553,51 @@ jobs:
           name: veyra-repo
           path: repo
           retention-days: 14
+
+  live-iso:
+    name: Live-ISO und Boot-Test von CD
+    needs: [image, kernel-reproducible]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Werkzeuge installieren und KVM freigeben
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd mtools dosfstools fdisk squashfs-tools xorriso qemu-system-x86 ovmf bc
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Abbild holen
+        uses: actions/download-artifact@v4
+        with:
+          name: veyra-core-0.1
+          path: img
+      - name: Kernel holen
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-a
+          path: k
+
+      - name: ISO bauen
+        run: |
+          zstd -q -d --rm img/veyra-core-0.1.img.zst -o veyra-core-0.1.img
+          sudo image/build-iso.sh veyra-core-0.1.img k/kernel veyra-core-0.1-live.iso
+          sudo chown "$(id -u):$(id -g)" veyra-core-0.1-live.iso
+          rm -f veyra-core-0.1.img
+          sha256sum veyra-core-0.1-live.iso | tee SHA256SUMS
+
+      - name: Boot-Test von CD (UEFI) und Selbsttest
+        run: SELFTEST=1 MEDIUM=cdrom image/boot-test.sh veyra-core-0.1-live.iso boot-live.log 600
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veyra-live-iso
+          path: |
+            veyra-core-0.1-live.iso
+            SHA256SUMS
+            boot-live.log
+          retention-days: 14

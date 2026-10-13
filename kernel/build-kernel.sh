@@ -83,13 +83,39 @@ rm -f "$staging/lib/modules/$kver/build" "$staging/lib/modules/$kver/source"
 install -m644 arch/x86/boot/bzImage "$OUT/vmlinuz-$kver"
 install -m644 .config "$OUT/config-$kver"
 install -m644 System.map "$OUT/System.map-$kver"
+
+step "Live-Variante (eingebaute Initramfs mit veyra-live-init, ohne root=)"
+# Gleicher Kernel, nur Kommandozeile und Initramfs anders; die Module bleiben dieselben.
+live=$build/live
+mkdir -p "$live"
+"$VEYRA_TGT-gcc" -static -O2 -Wall -Wextra -Werror -ffile-prefix-map="$here"=kernel \
+  -o "$live/init" "$here/live/init.c"
+"$VEYRA_TGT-strip" "$live/init"
+cat > "$live/initramfs.list" <<LIST
+dir /dev 0755 0 0
+nod /dev/console 0600 0 0 c 5 1
+dir /proc 0755 0 0
+dir /sys 0755 0 0
+dir /live 0755 0 0
+dir /newroot 0755 0 0
+file /init $live/init 0755 0 0
+LIST
+touch -d "@$SOURCE_DATE_EPOCH" "$live/init"
+cp .config "$live/config-normal"
+scripts/config --set-str CMDLINE "rw console=tty0 console=ttyS0,115200" \
+               --set-str INITRAMFS_SOURCE "$live/initramfs.list"
+kmake olddefconfig
+kmake bzImage
+install -m644 arch/x86/boot/bzImage "$OUT/vmlinuz-live-$kver"
+cp "$live/config-normal" .config
+echo "   Live-Kernel: $(stat -c %s "$OUT/vmlinuz-live-$kver") Bytes"
 tar --sort=name --format=posix --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
     --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
     -C "$staging" -cf - lib | zstd -q -19 -T1 -o "$OUT/modules-$kver.tar.zst"
 
 # Einzelpruefsummen der Module, damit ein Unterschied zwischen zwei Builds genau zuzuordnen ist.
 (cd "$staging" && find lib -type f -name '*.ko*' | LC_ALL=C sort | xargs -r sha256sum) > "$OUT/modules.sha256"
-(cd "$OUT" && sha256sum "vmlinuz-$kver" "config-$kver" "System.map-$kver" "modules-$kver.tar.zst" modules.sha256 > SHA256SUMS)
+(cd "$OUT" && sha256sum "vmlinuz-$kver" "vmlinuz-live-$kver" "config-$kver" "System.map-$kver" "modules-$kver.tar.zst" modules.sha256 > SHA256SUMS)
 cat "$OUT/SHA256SUMS"
 echo "   Module: $(wc -l < "$OUT/modules.sha256")"
 echo

@@ -1,10 +1,25 @@
 # Veyra in VirtualBox
 
-Veyra Core 0.1 gibt es als fertige VirtualBox-Festplatte `veyra-core-0.1.vdi`
-(Artefakt `veyra-virtualbox` jedes grünen CI-Laufs, 14 Tage aufbewahrt). Es wird nichts
-installiert: das ganze System liegt in dieser Datei.
+Zwei Wege, beide ohne Installation auf dem Rechner:
 
-## Einrichten
+- **Live-ISO** `veyra-core-0.1-live.iso` (Artefakt `veyra-live-iso`): als CD einlegen,
+  das System läuft im Arbeitsspeicher, Änderungen gehen beim Ausschalten verloren.
+- **Festplatte** `veyra-core-0.1.vdi` (Artefakt `veyra-virtualbox`): Änderungen bleiben.
+
+Beide Artefakte gibt es bei jedem grünen CI-Lauf, sie werden 14 Tage aufbewahrt.
+
+## Live-ISO
+
+1. Artefakt `veyra-live-iso` herunterladen und entpacken.
+2. VirtualBox: **Neu**
+   - Name `Veyra`, ISO-Abbild: `veyra-core-0.1-live.iso`, Typ **Linux**,
+     Version **Other Linux (64-bit)**, unbeaufsichtigte Installation **überspringen**
+   - Arbeitsspeicher mindestens 2048 MB, 2 CPUs, **EFI aktivieren**
+   - Keine Festplatte nötig
+3. Starten. Nach ein paar Sekunden erscheint `veyra login:`, anmelden als `root` ohne
+   Passwort.
+
+## Festplatte (VDI)
 
 1. Artefakt `veyra-virtualbox` herunterladen und entpacken.
 2. VirtualBox: **Neu**
