@@ -28,7 +28,8 @@ Alle Befehle verstehen `--root DIR`, um ein anderes System zu bearbeiten (so bau
   SHA-256 im `index.toml` passen.
 - Liegen öffentliche Schlüssel in `/etc/vpkg/keys/*.pem`, muss jedes Paket eine gültige
   Ed25519-Signatur (`PAKET.vpkg.sig`) haben. Ohne Schlüssel werden Signaturen nicht
-  geprüft. Einen Veyra-Signaturschlüssel gibt es noch nicht.
+  geprüft. Den Veyra-Schlüssel bringt das Paket `veyra-keyring` mit (siehe
+  [signaturen.md](signaturen.md)).
 - Dateien, die einem anderen Paket gehören oder keinem Paket gehören, werden nicht
   überschrieben (außer mit `--overwrite`).
 
@@ -42,8 +43,9 @@ bleibt die geänderte Datei als `DATEI.vpkgsave`.
 
 Ein Repository ist ein Verzeichnis (oder eine http(s)-Adresse) mit `.vpkg`-Dateien,
 den zugehörigen `.sig`-Dateien und einem `index.toml` von `vpkg index`. Die Quelle steht
-in `/etc/vpkg/repo` oder wird mit `--repo` angegeben. Ein öffentliches Veyra-Repository
-gibt es noch nicht.
+in `/etc/vpkg/repo` oder wird mit `--repo` angegeben. Das CI stellt bei jedem Lauf ein
+Repository mit allen Paketen als Artefakt `veyra-repo` bereit; öffentlich gehostet ist
+es noch nicht.
 
 ## Datenbank
 

@@ -36,6 +36,25 @@ if vpkg remove vpkg-demo && [ ! -e /usr/bin/vpkg-demo ] && ! vpkg list | grep -q
 else
   log "vpkg remove: FEHLER"; fail=1
 fi
+if ls /etc/vpkg/keys/*.pem >/dev/null 2>&1; then
+  cp "$demo" /run/unsigniert.vpkg
+  if vpkg install /run/unsigniert.vpkg >/dev/null 2>&1; then
+    log "Signaturpruefung: FEHLER (unsigniertes Paket angenommen)"; fail=1
+    vpkg remove vpkg-demo >/dev/null 2>&1
+  else
+    log "Signaturpruefung: ok (alle Pakete signiert, unsigniertes Paket abgelehnt)"
+  fi
+else
+  log "Signaturpruefung: keine Schluessel eingerichtet (Pakete unsigniert)"
+fi
+# Messwerte (Phase 6, hier nur in der VM): erst nach den Tests, damit vpkg nicht mitzaehlt.
+m() { echo "VEYRA-MESSUNG: $*"; }
+m "$(systemd-analyze time 2>&1 | head -n 1)"
+systemd-analyze blame 2>/dev/null | head -n 5 | sed 's/^ */VEYRA-MESSUNG:   langsam: /'
+m "Speicher belegt: $(free -m | awk '/^Mem:/ {print $3}') MiB von $(free -m | awk '/^Mem:/ {print $2}') MiB"
+m "Prozesse: $(ps -e --no-headers | wc -l), davon Kernel-Threads: $(ps -e -o ppid= | awk '$1 == 2' | wc -l)"
+m "Root-Dateisystem belegt: $(df -m / | awk 'NR == 2 {print $3}') MiB"
+m "Laufende Dienste: $(systemctl list-units --type=service --state=running --no-legend | wc -l)"
 if [ $fail = 0 ]; then log OK; else log FEHLER; fi
 SH
   chmod 755 "$pkgdir/usr/lib/veyra/selftest.sh"

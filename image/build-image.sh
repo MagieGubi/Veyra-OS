@@ -12,7 +12,8 @@
 #   KERNEL-VERZ enthaelt vmlinuz-* und modules-*.tar.zst (Phase 4),
 #   PAKET-VERZ zusaetzliche .vpkg-Dateien, die mit VPKG ins Abbild installiert werden
 #     (z. B. veyra-release, vpkg); liegt darin ein Ordner selftest/, kommt sein Inhalt
-#     nach /usr/lib/veyra/selftest (Testpakete fuer den Selbsttest),
+#     nach /usr/lib/veyra/selftest (Testpakete fuer den Selbsttest); liegt darin
+#     veyra-keyring-*.vpkg, wird es zuerst installiert (Signaturpruefung ab dann Pflicht),
 #   BASIS-VERZ die .vpkg-Dateien des Basissystems (Stufe 4b); sie werden in die
 #     VPKG-Datenbank des Abbilds eingetragen (vpkg register).
 set -euo pipefail
@@ -36,13 +37,20 @@ echo ">> Kernelmodule und Zusatzpakete"
 kernel=$(ls "$kdir"/vmlinuz-*)
 kver=${kernel##*/vmlinuz-}
 zstd -q -dc "$kdir/modules-$kver.tar.zst" | tar -xpf - -C "$root" --keep-directory-symlink
+# Paketschluessel zuerst: danach verlangt VPKG fuer jedes weitere Paket eine gueltige
+# Signatur, auch fuer die Basispakete beim Eintragen.
+mapfile -t keyring < <(find "$pkgdir" -maxdepth 1 -name 'veyra-keyring-*.vpkg')
+if [ "${#keyring[@]}" -gt 0 ]; then
+  echo ">> Paketschluessel (veyra-keyring)"
+  python3 "$vpkg" --root "$root" install --no-deps "${keyring[@]}"
+fi
 if [ -n "$basedir" ]; then
   echo ">> Basispakete in die VPKG-Datenbank eintragen"
   mapfile -t base < <(find "$basedir" -name '*.vpkg' | LC_ALL=C sort)
   [ "${#base[@]}" -gt 0 ] || { echo "keine Basispakete in $basedir" >&2; exit 1; }
   python3 "$vpkg" --root "$root" register "${base[@]}"
 fi
-mapfile -t extra < <(find "$pkgdir" -maxdepth 1 -name '*.vpkg' | LC_ALL=C sort)
+mapfile -t extra < <(find "$pkgdir" -maxdepth 1 -name '*.vpkg' ! -name 'veyra-keyring-*' | LC_ALL=C sort)
 if [ "${#extra[@]}" -gt 0 ]; then
   if [ -n "$basedir" ]; then
     python3 "$vpkg" --root "$root" install "${extra[@]}"

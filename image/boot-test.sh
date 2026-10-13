@@ -28,7 +28,9 @@ trap 'kill $qemu 2>/dev/null || true; rm -f "$vars"' EXIT
 
 timed_out() { [ "$(echo "$(date +%s.%N) - $start > $limit" | bc)" = 1 ]; }
 result=1
+kstart=""
 while kill -0 $qemu 2>/dev/null; do
+  if [ -z "$kstart" ] && grep -q 'Linux version' "$log" 2>/dev/null; then kstart=$(date +%s.%N); fi
   if grep -q 'veyra login:' "$log" 2>/dev/null; then result=0; break; fi
   if timed_out; then break; fi
   sleep 0.2
@@ -48,11 +50,17 @@ cat "$log" || true
 echo "----------------------------"
 if [ $result = 0 ]; then
   printf 'ERFOLG: Login-Aufforderung nach %.1f s (gemessen ab QEMU-Start, %s)\n' "$(echo "$end - $start" | bc)" "$accel"
+  if [ -n "$kstart" ]; then
+    printf '        davon bis zur ersten Kernel-Ausgabe (Firmware): %.1f s, danach %.1f s\n' \
+      "$(echo "$kstart - $start" | bc)" "$(echo "$end - $kstart" | bc)"
+  fi
 else
   echo "FEHLER: keine Login-Aufforderung innerhalb von ${limit}s" >&2
 fi
 if [ "$selftest" = 1 ] && [ $result = 0 ]; then
   if [ $st = 0 ]; then echo "ERFOLG: Selbsttest bestanden"; else echo "FEHLER: Selbsttest nicht bestanden" >&2; fi
+  echo "----- Messwerte (VM) -----"
+  grep -a 'VEYRA-MESSUNG' "$log" | sed 's/.*VEYRA-MESSUNG: //' || true
   result=$st
 fi
 exit $result

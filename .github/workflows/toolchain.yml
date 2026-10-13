@@ -483,6 +483,21 @@ jobs:
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
 
+      - name: Pakete signieren (wenn das Secret VPKG_SIGNING_KEY eingerichtet ist)
+        env:
+          VPKG_SIGNING_KEY: ${{ secrets.VPKG_SIGNING_KEY }}
+        run: |
+          if [ -z "$VPKG_SIGNING_KEY" ]; then
+            echo "::warning::Secret VPKG_SIGNING_KEY fehlt: Pakete bleiben unsigniert, das Abbild prueft keine Signaturen."
+            exit 0
+          fi
+          umask 077
+          key=$RUNNER_TEMP/veyra-signing-key.pem
+          printf '%s\n' "$VPKG_SIGNING_KEY" > "$key"
+          build/scripts/vpkg-build --srcdir "$PWD" --outdir extra packages/base/veyra-keyring
+          build/scripts/sign-packages.sh "$key" extra basis
+          rm -f "$key"
+
       - name: Abbild bauen
         run: |
           sudo image/build-image.sh sys/veyra-stage4b-3.tar.zst k/kernel extra veyra-core-0.1.img basis
@@ -503,4 +518,20 @@ jobs:
             veyra-core-0.1.img.zst
             boot.log
             SHA256SUMS
+          retention-days: 14
+
+      - name: Paket-Repository zusammenstellen
+        if: success()
+        run: |
+          mkdir -p repo
+          find basis extra -maxdepth 2 -name '*.vpkg' -not -path '*/selftest/*' -exec cp {} repo/ \;
+          find basis extra -maxdepth 2 -name '*.vpkg.sig' -not -path '*/selftest/*' -exec cp {} repo/ \;
+          python3 packages/base/vpkg/vpkg index repo
+          (cd repo && sha256sum ./*.vpkg > SHA256SUMS)
+          echo "Pakete: $(ls repo/*.vpkg | wc -l), signiert: $(ls repo/*.vpkg.sig 2>/dev/null | wc -l)"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: veyra-repo
+          path: repo
           retention-days: 14
