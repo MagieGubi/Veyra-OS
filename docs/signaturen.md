@@ -19,8 +19,17 @@ Der Selbsttest im gebooteten System prüft, dass ein unsigniertes Paket abgelehn
 Fehlt das Secret, baut das CI weiter, aber ohne Signaturen und ohne `veyra-keyring`
 (Warnung im Lauf).
 
-Schlüsselwechsel: neuen Schlüssel erzeugen
-(`openssl genpkey -algorithm ed25519 -out neu.pem`), den öffentlichen Teil als neue Datei
-ins Paket `veyra-keyring` legen, Secret ersetzen. Fingerabdruck des aktuellen Schlüssels
-(SHA-256 des öffentlichen Schlüssels im DER-Format):
-`00399a7e3e815ea41eb29f3faa282d84eccb42ebf68c71a78225e001159ca135`.
+Schlüssel erzeugen oder wechseln (zum Beispiel in Git Bash):
+
+```bash
+openssl genpkey -algorithm ed25519 -out veyra-signing-key.pem
+openssl pkey -in veyra-signing-key.pem -pubout
+```
+
+Den Inhalt von `veyra-signing-key.pem` als Secret `VPKG_SIGNING_KEY` eintragen, den
+ausgegebenen öffentlichen Schlüssel als `packages/base/veyra-keyring/veyra-2026.pem`
+ins Repository legen (und `sha256sums` im Rezept anpassen).
+
+> Stand 13.10.2026: Der öffentliche Schlüssel im Repository ist ein Platzhalter, sein
+> privater Teil existiert nicht mehr. Er wird ersetzt, sobald Adrian seinen Schlüssel
+> erzeugt hat; bis dahin baut das CI unsigniert.

@@ -22,7 +22,8 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
 | Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
 | Paketverwaltung VPKG 0.1 (installieren, entfernen, Abhängigkeiten) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 14 Tests grün, Selbsttest im gebooteten Abbild bestanden |
-| Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 8,1 s ab QEMU-Start mit KVM) |
+| Paketsignaturen (Ed25519), Paket-Repository als CI-Artefakt | `packages/base/veyra-keyring/`, [docs/signaturen.md](docs/signaturen.md) | eingebaut; signiert wird, sobald das Secret `VPKG_SIGNING_KEY` gesetzt ist |
+| Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 6,4 s ab QEMU-Start mit KVM, [Messwerte](docs/messwerte.md)) |
 
 ## Bauen
 
@@ -46,6 +47,8 @@ bash tests/vpkg/run.sh
 - [docs/architecture.md](docs/architecture.md): Architektur und Entscheidungen
 - [docs/vpkg-format.md](docs/vpkg-format.md): Paket- und Rezeptformat
 - [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.1
+- [docs/signaturen.md](docs/signaturen.md): Paketsignaturen
+- [docs/messwerte.md](docs/messwerte.md): Bootzeit und Ressourcen (VM)
 - [docs/build-guide.md](docs/build-guide.md): Bauablauf, Quellen und Lizenzen
 
 ## Lizenz
