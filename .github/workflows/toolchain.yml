@@ -454,7 +454,7 @@ jobs:
       - name: Werkzeuge installieren und KVM freigeben
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd mtools dosfstools fdisk e2fsprogs qemu-system-x86 ovmf bc
+          sudo apt-get install -y zstd mtools dosfstools fdisk e2fsprogs qemu-system-x86 qemu-utils ovmf bc
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
@@ -518,6 +518,24 @@ jobs:
             veyra-core-0.1.img.zst
             boot.log
             SHA256SUMS
+          retention-days: 14
+
+      # Fuer VirtualBox: dasselbe Abbild als VDI-Festplatte (VM mit EFI, Anleitung in
+      # docs/virtualbox.md). Dynamisch belegt, also nur so gross wie die Daten darin.
+      - name: VirtualBox-Festplatte (VDI)
+        if: success()
+        run: |
+          rm -f veyra-core-0.1.img.zst
+          qemu-img convert -f raw -O vdi veyra-core-0.1.img veyra-core-0.1.vdi
+          sha256sum veyra-core-0.1.vdi | tee SHA256SUMS-vdi
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: veyra-virtualbox
+          path: |
+            veyra-core-0.1.vdi
+            SHA256SUMS-vdi
+            docs/virtualbox.md
           retention-days: 14
 
       - name: Paket-Repository zusammenstellen

@@ -48,6 +48,7 @@ bash tests/vpkg/run.sh
 - [docs/vpkg-format.md](docs/vpkg-format.md): Paket- und Rezeptformat
 - [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.1
 - [docs/signaturen.md](docs/signaturen.md): Paketsignaturen
+- [docs/virtualbox.md](docs/virtualbox.md): Veyra in VirtualBox starten (fertige VDI-Festplatte)
 - [docs/hardware-test.md](docs/hardware-test.md): Test auf echter Hardware vom USB-Stick (Phase 6)
 - [docs/messwerte.md](docs/messwerte.md): Bootzeit und Ressourcen (VM)
 - [docs/build-guide.md](docs/build-guide.md): Bauablauf, Quellen und Lizenzen
