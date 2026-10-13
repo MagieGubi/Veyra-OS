@@ -30,6 +30,6 @@ Den Inhalt von `veyra-signing-key.pem` als Secret `VPKG_SIGNING_KEY` eintragen, 
 ausgegebenen öffentlichen Schlüssel als `packages/base/veyra-keyring/veyra-2026.pem`
 ins Repository legen (und `sha256sums` im Rezept anpassen).
 
-> Stand 13.10.2026: Der öffentliche Schlüssel im Repository ist ein Platzhalter, sein
-> privater Teil existiert nicht mehr. Er wird ersetzt, sobald Adrian seinen Schlüssel
-> erzeugt hat; bis dahin baut das CI unsigniert.
+Aktueller Schlüssel (seit 13.10.2026, von Adrian erzeugt): `veyra-2026.pem`,
+SHA-256 des öffentlichen Schlüssels (DER):
+`dae1e539857c6f7883263767a829b4e4696298697e4cec642d2a48004569f152`

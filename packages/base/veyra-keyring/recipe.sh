@@ -8,7 +8,7 @@ pkgdesc="Oeffentlicher Paketschluessel von Veyra OS"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(veyra-2026.pem)
-sha256sums=(1c9bab207b6ccd2de36189a71b718dfd38ee197c4cac59bc30ed075d72753cef)
+sha256sums=(8864857996c1efe48f04ab4661c0575fa97b16a3c35c17a10f9421d29ab2da75)
 
 package() {
   install -Dm644 "$srcdir/veyra-2026.pem" "$pkgdir/etc/vpkg/keys/veyra-2026.pem"
