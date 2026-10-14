@@ -476,9 +476,9 @@ jobs:
           pattern: pakete-4b-*
           path: basis
 
-      - name: Zusatzpakete bauen (veyra-release, vpkg, Selbsttest)
+      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, vpkg, Selbsttest)
         run: |
-          for r in packages/base/veyra-release packages/base/vpkg packages/test/veyra-selftest; do
+          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/vpkg packages/test/veyra-selftest; do
             build/scripts/vpkg-build --srcdir "$PWD" --outdir extra "$r"
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo

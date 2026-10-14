@@ -1,15 +1,16 @@
 # Selbsttest fuer das Entwicklungsabbild: laeuft einmal nach dem Start, prueft die
-# Paketdatenbank (vpkg check) und installiert und entfernt das Testpaket vpkg-demo.
+# Paketdatenbank (vpkg check), installiert und entfernt das Testpaket vpkg-demo und prueft
+# Netzwerk und fehlgeschlagene Dienste.
 # Ergebnis auf der seriellen Konsole: "VEYRA-SELBSTTEST: OK" oder "VEYRA-SELBSTTEST: FEHLER".
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.3
+pkgver=0.4
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg systemd bash)
+depends=(vpkg systemd bash iproute2 veyra-netzwerk)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -60,6 +61,49 @@ if ls /etc/vpkg/keys/*.pem >/dev/null 2>&1; then
   fi
 else
   log "Signaturpruefung: keine Schluessel eingerichtet (Pakete unsigniert)"
+fi
+# Netzwerk (Paket veyra-netzwerk): Adresse per DHCP, Router und DNS-Server. In einer VM
+# ist das Pflicht (QEMU und VirtualBox bringen ein Netz mit), auf echter Hardware nur ein
+# Bericht, weil vielleicht kein Kabel steckt.
+virt=$(systemd-detect-virt 2>/dev/null || true)
+for d in systemd-networkd systemd-resolved; do
+  systemctl is-active -q "$d" || { log "Netzwerk: FEHLER ($d laeuft nicht)"; fail=1; }
+done
+adr=""
+for _ in $(seq 1 30); do
+  adr=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2 " " $4; exit}')
+  [ -n "$adr" ] && break
+  sleep 1
+done
+gw=$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')
+dns=$(resolvectl dns 2>/dev/null | grep -oE '([0-9]+\.){3}[0-9]+' | head -n 1)
+if [ -n "$adr" ] && [ -n "$gw" ] && [ -n "$dns" ]; then
+  log "Netzwerk: ok ($adr per DHCP, Router $gw, DNS $dns)"
+elif [ "$virt" != none ] && [ -n "$virt" ]; then
+  log "Netzwerk: FEHLER in der VM ($virt): Adresse '${adr}', Router '${gw}', DNS '${dns}'"
+  networkctl --no-pager 2>&1 | sed 's/^/VEYRA-SELBSTTEST:   /'
+  fail=1
+else
+  log "Netzwerk: keine Adresse per Kabel (kein Kabel oder nur WLAN, das noch fehlt)"
+fi
+[ "$(readlink /etc/resolv.conf)" = ../run/systemd/resolve/stub-resolv.conf ] \
+  || { log "Netzwerk: FEHLER (/etc/resolv.conf zeigt nicht auf systemd-resolved)"; fail=1; }
+# Namensaufloesung braucht Internet; ohne gilt es nicht als Fehler.
+if n=$(timeout 15 getent hosts github.com); then
+  log "Namensaufloesung: ok (github.com -> $(echo "$n" | awk '{print $1; exit}'))"
+else
+  log "Namensaufloesung: nicht moeglich (kein Internet?), kein Fehler"
+fi
+# Kein Dienst darf beim Start fehlgeschlagen sein.
+kaputt=$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}')
+if [ -z "$kaputt" ]; then
+  log "Dienste: ok (keiner fehlgeschlagen)"
+else
+  log "Dienste: FEHLER, fehlgeschlagen: ${kaputt//$'\n'/ }"
+  for u in $kaputt; do
+    journalctl -b -u "$u" -n 5 --no-pager 2>&1 | sed 's/^/VEYRA-SELBSTTEST:   /'
+  done
+  fail=1
 fi
 # Messwerte (Phase 6, hier nur in der VM): erst nach den Tests, damit vpkg nicht mitzaehlt.
 m() { echo "VEYRA-MESSUNG: $*"; }
