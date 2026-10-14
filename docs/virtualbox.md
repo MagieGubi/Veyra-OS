@@ -41,5 +41,6 @@ Etwa 20 s nach dem Start läuft der Selbsttest und zeigt sein Ergebnis auf dem B
 - Ist unter Windows Hyper-V oder die virtualisierungsbasierte Sicherheit aktiv, läuft
   VirtualBox langsamer. Die Bootzeit in VirtualBox ist deshalb kein Messwert für Veyra.
 - Bisher gibt es nur die Textkonsole, keine grafische Oberfläche.
-- Das Netzwerk (Intel-Netzwerkkarte von VirtualBox) wird erkannt, ist aber noch nicht
-  eingerichtet.
+- Netzwerk: Mit dem voreingestellten VirtualBox-Adapter (NAT) holt sich Veyra per DHCP
+  eine Adresse und kommt ins Internet; prüfen mit `ip addr` und
+  `getent hosts github.com`. In QEMU ist das im CI getestet, in VirtualBox noch nicht.

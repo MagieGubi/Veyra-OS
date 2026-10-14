@@ -1,4 +1,4 @@
-# Phase 6: Bestandsaufnahme und VPKG-Transaktionen
+# Phase 6: Bestandsaufnahme, VPKG-Transaktionen, Netzwerk und Herunterfahren
 
 Phase 6 heißt Hardware-Kompatibilität, Systemstabilität und Release 0.2. Dieser erste
 Schritt behebt einen echten Fehler in VPKG, bevor neue Funktionen dazukommen.
@@ -172,3 +172,80 @@ Verbesserung 2 und 3 zusammen: Netzwerk per systemd-networkd und DHCP einrichten
 Boot-Test prüfen, dass keine Dienste fehlschlagen und `poweroff` sauber endet. Das ist
 die Voraussetzung, um Pakete später aus einem Online-Repository zu installieren. Danach
 folgt Verbesserung 4 (signierter Index), bevor das Repository öffentlich wird.
+
+---
+
+# Schritt 2: Netzwerk und sauberes Herunterfahren
+
+Umsetzung von Verbesserung 2 und 3 aus der Liste oben (Adrian: "ja passt dann mach das",
+2026-10-14).
+
+## Ausgangszustand
+
+Die Boot-Logs zeigten: `systemd-networkd`, `systemd-resolved` und `systemd-logind`
+liefen bereits, die Netzwerkkarte (`enp0s2`, Intel e1000e in QEMU) wurde erkannt, aber
+es gab keine Netzwerk-Einstellung. Das System hatte also keine Adresse. Ob Dienste
+fehlschlagen und ob das System sich sauber ausschaltet, prüfte kein Test; der Boot-Test
+beendete QEMU einfach.
+
+## Was geändert wurde
+
+| Datei | Zweck |
+| --- | --- |
+| `packages/base/veyra-netzwerk/recipe.sh` (neu) | `89-veyra-kabel.network`: jede kabelgebundene Karte per DHCP (IPv4 und IPv6), virtuelle Geräte ausgenommen, kein Warten ohne Kabel. networkd und resolved fest eingeschaltet, `/etc/resolv.conf` zeigt auf den Stub von resolved. Eigene Einstellungen kommen nach `/etc/systemd/network/`. |
+| `packages/test/veyra-selftest/recipe.sh` (0.4) | Prüft Adresse, Router und DNS-Server (in einer VM Pflicht, auf echter Hardware nur Bericht, weil vielleicht kein Kabel steckt), Namensauflösung (nur Bericht, braucht Internet) und dass kein Dienst fehlgeschlagen ist. |
+| `image/boot-test.sh` | Nach dem Selbsttest Herunterfahren über den ACPI-Ausschalter (wie der Einschaltknopf). Erfolg nur, wenn innerhalb von 90 s `reboot: Power down` kommt und keine Einheit fehlschlägt (`FAILED`, `Failed unmounting/stopping/deactivating`, `timed out`). |
+| `image/build-iso.sh` | Live-ISO: die drei Live-Mounts (Medium, SquashFS, RAM-Schicht) bekommen `DefaultDependencies=no`, damit systemd sie beim Herunterfahren nicht einzeln aushängt (siehe unten). |
+| `.github/workflows/toolchain.yml` | baut das neue Paket mit |
+| `docs/virtualbox.md` | Netzwerk-Hinweis aktualisiert |
+
+### Gefundener Fehler beim Herunterfahren der Live-ISO
+
+Der neue Abschalttest schlug zuerst bei der Live-ISO fehl:
+`[FAILED] Failed unmounting /run/veyra-live/medium`. Das Medium trägt über SquashFS und
+Overlay das laufende Root-Dateisystem und ist bis zuletzt belegt; systemd versuchte trotzdem,
+es als einzelne Einheit auszuhängen. Jetzt bleiben die drei Mounts wie `/` selbst bis
+zum Ausschalten stehen. Das ist unbedenklich: das Medium ist nur lesend eingehängt, die
+RAM-Schicht geht beim Ausschalten ohnehin verloren. In der letzten Phase meldet
+`systemd-shutdown` weiterhin, dass es Medium und Loop-Gerät nicht lösen kann; das ist bei
+einem Live-System ohne eigene Abschalt-Initramfs erwartet.
+
+## Ergebnisse (CI)
+
+Lauf [38517817749](https://github.com/MagieGubi/Veyra-OS/actions/runs/38517817749):
+
+| | Abbild (virtuelle Festplatte) | Live-ISO (virtuelle CD) |
+| --- | --- | --- |
+| Netzwerk | ok: `enp0s2 10.0.2.15/24` per DHCP, Router 10.0.2.2, DNS 10.0.2.3 | ok, gleiche Werte |
+| Namensauflösung | ok: github.com aufgelöst | ok |
+| Fehlgeschlagene Dienste | keine | keine |
+| Herunterfahren | sauber, `reboot: Power down`, alle Dateisysteme ausgehängt | **FEHLER** (siehe oben) |
+
+Lauf [38530142524](https://github.com/MagieGubi/Veyra-OS/actions/runs/38530142524) mit der
+Korrektur: **alle Jobs grün**.
+
+| | Abbild (virtuelle Festplatte) | Live-ISO (virtuelle CD) |
+| --- | --- | --- |
+| Netzwerk | ok: `enp0s2 10.0.2.15/24` per DHCP, Router 10.0.2.2, DNS 10.0.2.3 | ok, gleiche Werte |
+| Namensauflösung, fehlgeschlagene Dienste | ok, keine | ok, keine |
+| Herunterfahren über den Ausschalter | sauber, alle Dateisysteme ausgehängt, etwa 1 s laut Kernel-Zeitstempeln | sauber, keine fehlgeschlagene Einheit; Medium und Loop-Gerät bleiben bis zum Ausschalten eingehängt (erwartet), etwa 1 s |
+| systemd-Startzeit | 1,317 s Kernel + 1,433 s Userspace | 1,284 s + 1,404 s |
+| Arbeitsspeicher belegt | 92 MiB | 142 MiB |
+
+Die Abschaltdauer zeigte der Boot-Test in diesem Lauf fälschlich als 0,0 s, weil die
+Zeitmessung erst nach dem Senden des Befehls begann; das ist korrigiert. Die Werte oben
+stammen aus den Kernel-Zeitstempeln im Log.
+
+## Einschränkungen
+
+- Nur in QEMU getestet (Netzwerkkarte Intel e1000e, Netz von QEMU). Auf echter Hardware
+  und in VirtualBox noch nicht.
+- Nur Kabel. WLAN braucht Firmware-Dateien und einen WLAN-Dienst (iwd oder
+  wpa_supplicant); das ist Verbesserung 5.
+- Keine Firewall. Welche Ports im laufenden System offen sind, prüft noch kein Test;
+  das gehört zum nächsten Selbsttest-Ausbau (`ss -tulpn`).
+
+## Nächster Schritt
+
+Verbesserung 4: Repository-Index signieren und ältere Versionen ablehnen. Mit Netzwerk
+kann VPKG dann Pakete direkt aus einem Online-Repository laden.

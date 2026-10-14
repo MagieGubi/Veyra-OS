@@ -24,6 +24,7 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Paketverwaltung VPKG 0.2 (installieren, entfernen, Abhängigkeiten, Transaktionen mit Rücknahme) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 21 Tests grün, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
 | Paketsignaturen (Ed25519), Paket-Repository als CI-Artefakt | `packages/base/veyra-keyring/`, [docs/signaturen.md](docs/signaturen.md) | eingebaut, Schlüssel `veyra-2026` aktiv |
 | Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 6,4 s ab QEMU-Start mit KVM, [Messwerte](docs/messwerte.md)) |
+| Netzwerk per Kabel (DHCP, Namensauflösung), Prüfung auf fehlgeschlagene Dienste und sauberes Herunterfahren | `packages/base/veyra-netzwerk/`, `image/boot-test.sh`, [Phase 6](docs/phase6.md) | in QEMU getestet (Abbild und Live-ISO), nicht auf echter Hardware |
 
 ## Bauen
 

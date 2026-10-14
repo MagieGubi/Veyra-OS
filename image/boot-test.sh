@@ -77,14 +77,14 @@ if [ "$selftest" = 1 ] && [ $result = 0 ]; then
   echo "----- Herunterfahren (ACPI-Ausschalter) -----"
   sleep 3   # der Selbsttest kopiert nach "OK" noch seinen Bericht
   zeilen=$(wc -l < "$log")
+  t0=$(date +%s.%N)
   python3 - "$mon" <<'PY2'
 import socket, sys, time
 s = socket.socket(socket.AF_UNIX)
 s.connect(sys.argv[1])
 s.sendall(b"system_powerdown\n")
-time.sleep(1)
+time.sleep(1)   # Verbindung offen lassen, bis der Monitor den Befehl gelesen hat
 PY2
-  t0=$(date +%s.%N)
   aus=1
   for _ in $(seq 1 450); do
     if ! kill -0 $qemu 2>/dev/null; then aus=0; break; fi
