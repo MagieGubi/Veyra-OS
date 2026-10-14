@@ -48,6 +48,15 @@ Veyra OS Core 0.1 Live (Entwicklungsabbild) \l
 Anmeldung: root, ohne Passwort. Aenderungen gehen beim Ausschalten verloren.
 
 ISSUE
+# Medium, SquashFS und RAM-Schicht tragen das laufende Root-Dateisystem (eingehaengt von
+# kernel/live/init.c). systemd darf sie beim Herunterfahren nicht einzeln aushaengen (das
+# scheitert, das Medium ist belegt): ohne Standard-Abhaengigkeiten entfaellt der Konflikt
+# mit umount.target, sie bleiben bis zum Ausschalten stehen wie "/" selbst.
+for m in medium sfs rw; do
+  d="$work/root/etc/systemd/system/run-veyra\\x2dlive-$m.mount.d"
+  mkdir -p "$d"
+  printf '[Unit]\nDefaultDependencies=no\n' > "$d/live.conf"
+done
 
 echo ">> SquashFS (Zeitstempel aus SOURCE_DATE_EPOCH, das mksquashfs selbst auswertet)"
 mkdir -p "$work/iso/veyra"
