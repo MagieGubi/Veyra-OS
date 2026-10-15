@@ -22,13 +22,15 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
         run: |
           python3 -m py_compile packages/base/vpkg/vpkg
           bash tests/vpkg/vpkg-test.sh
+      - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
+        run: bash tests/boot/diagnose-test.sh
       - name: Rezepte und Quellenlisten pruefen
         run: |
           for r in packages/*/*/recipe.sh; do bash -n "$r"; done

@@ -34,5 +34,25 @@ Intel-Grafik aus) und NVIDIA. Beides folgt mit eigenen Paketen.
    zeigt seine Ergebnisse auf dem Bildschirm.
 6. Mit `poweroff` ausschalten, Windows starten, im Laufwerk `VEYRA-DATEN` die Dateien
    `veyra-messung.txt` und `kernel-log.txt` öffnen.
-7. Secure Boot im BIOS wieder einschalten, falls gewünscht (Windows 11 braucht es nicht
+7. Optional, in Git Bash im geklonten Repository: `bash image/boot-diagnose.sh
+   /d/kernel-log.txt` (Laufwerksbuchstaben anpassen). Es listet bekannte Fehlermuster
+   (Kernel-Panik, fehlende Firmware, Ein-/Ausgabefehler, fehlgeschlagene Dienste) mit den
+   passenden Zeilen. Die Zeile „Erreicht“ gilt nur für Konsolen-Logs aus QEMU; im
+   Kernel-Log fehlt die Login-Aufforderung immer.
+8. Secure Boot im BIOS wieder einschalten, falls gewünscht (Windows 11 braucht es nicht
    zum Starten, manche Spiele mit Anti-Cheat schon).
+
+## Stand der Hardware-Unterstützung (geprüft am Code, 15.10.2026)
+
+Grundlage: `kernel/config/veyra-30-hardware.config`, Pakete unter `packages/`, Konsolen-Logs
+aus QEMU. Auf echter Hardware ist noch nichts davon bestätigt.
+
+| Bereich | Im Code | Geprüft | Fehlt |
+| --- | --- | --- | --- |
+| NVMe | `BLK_DEV_NVME=y` | nein (QEMU startet von virtio, nicht NVMe) | Test am Laptop |
+| USB-Stick als Startmedium | xHCI, `USB_STORAGE`, `USB_UAS` fest eingebaut, `rootwait` | nein | Test am Laptop |
+| Tastatur | i8042/AT-Tastatur, USB-HID fest; Touchpad (I2C-HID) als Modul | nein | Test am Laptop; deutsche Belegung (ROADMAP P4-1) |
+| Bild | simpledrm über den UEFI-Framebuffer, i915 fest eingebaut | nein (QEMU läuft ohne Grafik) | Intel-Firmware (DMC) für Stromsparen |
+| WLAN | `IWLWIFI`/`IWLMVM` als Modul | nein | Firmware (P2-3), `regulatory.db` (fehlt laut Kernel-Log in beiden Boot-Tests von Lauf 38697548625), iwd (P2-4) |
+| Firmware | keine Firmware-Dateien im Abbild | – | Paket (ROADMAP P2-3) |
+| NVIDIA | bewusst aus (`DRM_NOUVEAU=n`) | – | später |

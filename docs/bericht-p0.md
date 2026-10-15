@@ -92,3 +92,20 @@ System in VirtualBox: Artefakt `veyra-live-iso` aus dem CI-Lauf oben herunterlad
 (GitHub-Anmeldung nötig), ZIP entpacken und nach [virtualbox.md](virtualbox.md) starten.
 Nach dem Login als root zeigt `journalctl -u veyra-selftest` den Selbsttest, darin die
 Zeile „Offene Ports“.
+
+## Nachtrag: Boot-Diagnose (ROADMAP P1-7)
+
+Teil 4 des Auftrags (Bootmeldungen und Fehlerdiagnose verbessern, Hardware-Unterstützung
+am Code prüfen) war im ersten Durchgang offen geblieben.
+
+- `image/boot-diagnose.sh`: wertet ein Konsolen- oder Kernel-Log aus, nennt die erreichte
+  Startstufe und bekannte Fehlermuster mit den passenden Zeilen. `boot-test.sh` ruft es bei
+  jedem Fehlschlag auf; Adrian kann es auf `kernel-log.txt` vom USB-Stick anwenden.
+- `tests/boot/diagnose-test.sh`: 9 Tests mit künstlichen Logs je Stufe, im CI-Job
+  „VPKG-Tests“. Lokal 9 von 9 bestanden.
+- Auf die echten grünen Logs angewandt fand es einen echten Befund: `regulatory.db` fehlt
+  (WLAN-Regulierungsdaten, gehört zum Firmware-Paket P2-3).
+- `docs/hardware-test.md`: Tabelle zum Stand von NVMe, USB, Tastatur, Bild, WLAN und
+  Firmware, geprüft am Code; auf echter Hardware ist davon nichts bestätigt.
+- ROADMAP: jede Aufgabe hat jetzt alle sechs Pflichtfelder (Ziel, Dateien, Schritte,
+  Abhängigkeiten/Risiken, Akzeptanz, Testnachweis).

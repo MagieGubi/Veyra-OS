@@ -8,6 +8,8 @@
 # am Rechner): Erfolg nur, wenn das System sich innerhalb von 90 s sauber ausschaltet
 # ("reboot: Power down") und dabei keine Einheit fehlschlaegt.
 #
+# Bei einem Fehlschlag folgt eine Diagnose (image/boot-diagnose.sh).
+#
 # Aufruf: [SELFTEST=1] [MEDIUM=cdrom] image/boot-test.sh ABBILD.img LOG [SEKUNDEN]
 set -euo pipefail
 img=$1 log=$2 limit=${3:-600}
@@ -104,4 +106,6 @@ PY2
   fi
   rm -f "$log.aus"
 fi
+# Bei jedem Fehlschlag: wie weit kam der Start, welche bekannten Fehler stehen im Log
+[ $result = 0 ] || "$(dirname "$0")/boot-diagnose.sh" "$log"
 exit $result
