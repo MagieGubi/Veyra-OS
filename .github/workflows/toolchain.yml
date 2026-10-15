@@ -80,7 +80,7 @@ jobs:
             out/sources.lock
             out/build-cross.log
             out/SHA256SUMS
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
 
       - name: Gesperrte Quellen anzeigen
         run: cat out/*sources.lock
@@ -133,7 +133,7 @@ jobs:
             out/temptools-sources.lock
             out/build-temp.log
             out/SHA256SUMS
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
 
       - name: Gesperrte Quellen anzeigen
         run: cat out/*sources.lock
@@ -179,7 +179,7 @@ jobs:
         with:
           name: kernel-${{ matrix.build }}
           path: out
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
 
       - name: Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/kernel/SHA256SUMS out/kernel-sources.lock
@@ -257,7 +257,7 @@ jobs:
             out/stage4-sources.lock
             out/build-stage4a.log
             out/SHA256SUMS
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
 
       - name: Gesperrte Quellen anzeigen
         run: cat out/stage4-sources.lock
@@ -313,12 +313,12 @@ jobs:
             out/packages
             out/stage4-sources.lock
             out/build-stage4b-1.log
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
       - uses: actions/upload-artifact@v4
         with:
           name: pakete-4b-1
           path: out/packages
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
@@ -374,12 +374,12 @@ jobs:
             out/packages
             out/stage4-sources.lock
             out/build-stage4b-2.log
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
       - uses: actions/upload-artifact@v4
         with:
           name: pakete-4b-2
           path: out/packages
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
@@ -435,12 +435,12 @@ jobs:
             out/packages
             out/stage4-sources.lock
             out/build-stage4b-3.log
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
       - uses: actions/upload-artifact@v4
         with:
           name: pakete-4b-3
           path: out/packages
-          retention-days: 14
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
 
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
@@ -520,7 +520,7 @@ jobs:
             veyra-core-0.1.img.zst
             boot.log
             SHA256SUMS
-          retention-days: 14
+          retention-days: 7
 
       # Fuer VirtualBox: dasselbe Abbild als VDI-Festplatte (VM mit EFI, Anleitung in
       # docs/virtualbox.md). Dynamisch belegt, also nur so gross wie die Daten darin.
@@ -538,7 +538,7 @@ jobs:
             veyra-core-0.1.vdi
             SHA256SUMS-vdi
             docs/virtualbox.md
-          retention-days: 14
+          retention-days: 7
 
       - name: Paket-Repository zusammenstellen
         if: success()
@@ -569,7 +569,7 @@ jobs:
         with:
           name: veyra-repo
           path: repo
-          retention-days: 14
+          retention-days: 7
 
   live-iso:
     name: Live-ISO und Boot-Test von CD
@@ -617,4 +617,4 @@ jobs:
             veyra-core-0.1-live.iso
             SHA256SUMS
             boot-live.log
-          retention-days: 14
+          retention-days: 7

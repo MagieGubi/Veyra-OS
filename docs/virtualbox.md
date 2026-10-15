@@ -6,7 +6,7 @@ Zwei Wege, beide ohne Installation auf dem Rechner:
   das System läuft im Arbeitsspeicher, Änderungen gehen beim Ausschalten verloren.
 - **Festplatte** `veyra-core-0.1.vdi` (Artefakt `veyra-virtualbox`): Änderungen bleiben.
 
-Beide Artefakte gibt es bei jedem grünen CI-Lauf, sie werden 14 Tage aufbewahrt.
+Beide Artefakte gibt es bei jedem grünen CI-Lauf, sie werden 7 Tage aufbewahrt.
 
 ## Live-ISO
 
