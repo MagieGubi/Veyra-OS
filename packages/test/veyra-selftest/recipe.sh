@@ -5,7 +5,7 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.4
+pkgver=0.5
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
@@ -93,6 +93,17 @@ if n=$(timeout 15 getent hosts github.com); then
   log "Namensaufloesung: ok (github.com -> $(echo "$n" | awk '{print $1; exit}'))"
 else
   log "Namensaufloesung: nicht moeglich (kein Internet?), kein Fehler"
+fi
+# Nichts darf von aussen erreichbar sein: keine TCP/UDP-Ports ausser auf Loopback. Ausnahme
+# sind die Antwort-Ports der DHCP-Clients (UDP 68 fuer IPv4, 546 fuer IPv6).
+offen=$(ss -H -tuln 2>/dev/null | awk '{print $1 " " $5}' \
+  | grep -vE ' (127\.[0-9.]+(%[[:alnum:]]+)?|\[::1\]|\[::ffff:127\.[0-9.]+\]):[0-9]+$' \
+  | grep -vE '^udp .*:(68|546)$' || true)
+if [ -z "$offen" ]; then
+  log "Offene Ports: ok (nur Loopback)"
+else
+  log "Offene Ports: FEHLER, von aussen erreichbar: ${offen//$'\n'/, }"
+  fail=1
 fi
 # Kein Dienst darf beim Start fehlgeschlagen sein.
 kaputt=$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}')

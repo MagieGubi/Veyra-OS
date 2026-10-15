@@ -105,7 +105,33 @@ SHA-256 als `install_sha256` ins Manifest ein; `vpkg-verify` und VPKG lehnen ein
 dessen Skript nicht dazu passt. VPKG führt sie nach dem Installieren aus, bei `--root` per
 `chroot`. Beim Bau des Basissystems ruft `stage4/chroot/30-packages.sh` sie direkt auf.
 
-## Installieren: VPKG 0.1
+## Repository-Index
+
+`vpkg index [--stand ZAHL] VERZ` schreibt `VERZ/index.toml`:
+
+```toml
+format = 1
+stand = 1792000000        # muss mit jeder Ausgabe steigen (CI: Commit-Zeit)
+
+[[package]]
+name = "liba"
+version = "1.0"
+release = 1
+description = ""
+depends = []
+provides = []
+conflicts = []
+filename = "liba-1.0-1-x86_64.vpkg"   # nur ein Dateiname, kein Pfad
+sha256 = "…"                          # SHA-256 der .vpkg-Datei
+```
+
+`stand` ist neu in VPKG 0.3. Ohne `--stand` gilt `SOURCE_DATE_EPOCH`, sonst die aktuelle
+Zeit. Ältere Indizes ohne `stand` liest VPKG weiter, solange keine Schlüssel eingerichtet
+sind; ein **signierter** Index muss `stand` enthalten. Die Signatur `index.toml.sig`
+(Ed25519 über die ganze Datei) schreibt `build/scripts/sign-packages.sh`.
+Migration bestehender Repositories: `vpkg index` neu laufen lassen und signieren.
+
+## Installieren: VPKG
 
 Die Bedienung von `vpkg` steht in [vpkg.md](vpkg.md).
 

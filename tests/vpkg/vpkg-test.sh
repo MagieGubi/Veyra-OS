@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests fuer VPKG 0.2 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
+# Tests fuer VPKG 0.3 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
 # Braucht python3 (3.11+), zstd, openssl. Laeuft ohne root-Rechte.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -272,6 +272,85 @@ for b in rechte doppelt datenbank unterlink pruefsumme typ abhaengigkeit; do
 done
 sauber "Manifeste"
 ok "manipulierte Manifeste (Rechte, doppelte Pfade, Paketdatenbank, Pfad unter Datei, Pruefsumme, Typ, Abhaengigkeit) abgelehnt"
+
+# ---- Repository-Sicherheit (VPKG 0.3): signierter Index, Stand, Index-Eintraege, Downgrade.
+sr=$t/sr
+mkdir -p "$sr/etc/vpkg/keys"
+vs() { python3 "$here/packages/base/vpkg/vpkg" --root "$sr" "$@"; }
+openssl genpkey -algorithm ed25519 -out "$t/rkey.pem" 2>/dev/null
+openssl pkey -in "$t/rkey.pem" -pubout -out "$sr/etc/vpkg/keys/test.pem"
+sig() { openssl pkeyutl -sign -inkey "$t/rkey.pem" -rawin -in "$1" -out "$1.sig"; }
+# mkrepo VERZ STAND PAKET...: Repository mit signierten Paketen und signiertem Index
+mkrepo() {
+  local d=$1 st=$2; shift 2
+  rm -rf "$d" && mkdir -p "$d"
+  local f
+  for f in "$@"; do cp "$P/$f" "$d/" && sig "$d/$f"; done
+  python3 "$here/packages/base/vpkg/vpkg" index --stand "$st" "$d" >/dev/null
+  sig "$d/index.toml"
+}
+abgelehnt() {   # abgelehnt MELDUNG BEFEHL...: Befehl muss mit MELDUNG scheitern
+  local want=$1; shift
+  if "$@" >"$t/out" 2>&1; then fail "angenommen statt abgelehnt ($want): $*"; fi
+  grep -q "$want" "$t/out" || fail "falsche Meldung (erwartet '$want'): $(cat "$t/out")"
+  ! grep -q Traceback "$t/out" || fail "Python-Traceback: $(cat "$t/out")"
+}
+mkrepo "$t/rp" 100 liba-1.0-1-x86_64.vpkg app-1.0-1-x86_64.vpkg
+rm "$t/rp/index.toml.sig"
+abgelehnt 'nicht signiert' vs install --repo "$t/rp" app
+sig "$t/rp/index.toml"
+sed -i 's/^description = ""/description = "anders"/' "$t/rp/index.toml"
+abgelehnt 'Signatur des Repository-Index ungueltig' vs install --repo "$t/rp" app
+mkrepo "$t/rp" 100 liba-1.0-1-x86_64.vpkg app-1.0-1-x86_64.vpkg
+vs install --repo "$t/rp" app >/dev/null || fail "signiertes Repository abgelehnt"
+grep -q '"[^"]*rp": 100' "$sr/var/lib/vpkg/repo-stand.json" || fail "Stand nicht gemerkt"
+ok "Repository-Index: unsigniert und veraendert abgelehnt, signiert angenommen"
+
+mkrepo "$t/rp" 50 liba-1.0-1-x86_64.vpkg app-2.0-1-x86_64.vpkg
+abgelehnt 'aelter als der zuletzt angenommene' vs upgrade --repo "$t/rp"
+mkrepo "$t/rp" 200 liba-1.0-1-x86_64.vpkg app-2.0-1-x86_64.vpkg
+vs upgrade --repo "$t/rp" >/dev/null || fail "neuerer Index abgelehnt"
+vs list | grep -qx 'app 2.0-1' || fail "upgrade mit neuerem Index"
+grep -q '"[^"]*rp": 200' "$sr/var/lib/vpkg/repo-stand.json" || fail "neuer Stand nicht gemerkt"
+sed -i '/^stand = /d' "$t/rp/index.toml" && sig "$t/rp/index.toml"
+abgelehnt 'ohne Stand' vs upgrade --repo "$t/rp"
+ok "Repository-Index: aelterer Stand (zurueckgespielte Kopie) und fehlender Stand abgelehnt"
+
+mkrepo "$t/rp" 300 liba-1.0-1-x86_64.vpkg app-2.0-1-x86_64.vpkg dieb-1.0-1-x86_64.vpkg
+cp "$t/rp/index.toml" "$t/index.gut"
+sed -i 's/^filename = "liba-1.0-1-x86_64.vpkg"/filename = "..\/..\/liba-1.0-1-x86_64.vpkg"/' "$t/rp/index.toml" && sig "$t/rp/index.toml"
+abgelehnt 'ungueltiger Dateiname' vs install --repo "$t/rp" liba
+# Index-Eintrag liba zeigt auf das Paket dieb (gueltig signiert, aber ein anderes Paket).
+dsha=$(sha256sum "$t/rp/dieb-1.0-1-x86_64.vpkg" | cut -d' ' -f1)
+python3 - "$t/index.gut" "$t/rp/index.toml" "$dsha" <<'PYX'
+import sys
+s = open(sys.argv[1]).read()
+blk = s.split("\n[[package]]\n")
+out = [blk[0]]
+for b in blk[1:]:
+    if 'name = "liba"' in b:
+        b = "\n".join(("filename = \"dieb-1.0-1-x86_64.vpkg\"" if l.startswith("filename") else
+                       f"sha256 = \"{sys.argv[3]}\"" if l.startswith("sha256") else l)
+                      for l in b.split("\n"))
+    out.append(b)
+open(sys.argv[2], "w").write("\n[[package]]\n".join(out))
+PYX
+sig "$t/rp/index.toml"
+vs remove app >/dev/null
+abgelehnt 'passt nicht zum Repository-Index' vs install --repo "$t/rp" liba
+cp "$t/index.gut" "$t/rp/index.toml" && sed -i 's/^sha256 = "\(.\{10\}\).*"/sha256 = "kaputt"/' "$t/rp/index.toml" && sig "$t/rp/index.toml"
+abgelehnt 'ungueltige Pruefsumme' vs install --repo "$t/rp" liba
+ok "Repository-Index: Pfad im Dateinamen, falsches Paket hinter einem Eintrag und kaputte Pruefsumme abgelehnt"
+
+vs list | grep -qx 'liba 1.0-1' || fail "liba fehlt fuer den Downgrade-Test"
+cp "$t/index.gut" "$t/rp/index.toml" && sig "$t/rp/index.toml"
+vs install --repo "$t/rp" app >/dev/null || fail "app 2.0 aus dem Repository"
+sig "$P/app-1.0-1-x86_64.vpkg"
+abgelehnt 'aelter als die installierte Version' vs install "$P/app-1.0-1-x86_64.vpkg"
+vs list | grep -qx 'app 2.0-1' || fail "Version nach abgelehntem Downgrade veraendert"
+vs install --allow-downgrade "$P/app-1.0-1-x86_64.vpkg" >/dev/null || fail "--allow-downgrade"
+vs list | grep -qx 'app 1.0-1' || fail "Downgrade mit --allow-downgrade nicht ausgefuehrt"
+ok "aeltere Version wird nur mit --allow-downgrade installiert"
 
 # Die eigenen Pakete (wie im CI-Job "image" gebaut) muessen die Manifestpruefung bestehen;
 # vpkg selbst bringt z. B. die leeren Verzeichnisse der Paketdatenbank mit.

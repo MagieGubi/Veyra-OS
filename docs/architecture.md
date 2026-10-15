@@ -28,8 +28,9 @@ Diese Datei hält die Entscheidungen fest, die für den Code in diesem Repositor
 
 ## Ehrliche Grenzen
 
-- VPKG 0.1 wird nicht atomar sein; ein Absturz mitten in einer Transaktion kann einen
-  halbfertigen Zustand hinterlassen. Ausfallsicherheit kommt mit Btrfs-Snapshots.
+- VPKG nimmt seit 0.2 abgebrochene Vorgänge per Journal zurück (docs/vpkg.md,
+  Transaktionen). Install-Skripte bleiben davon ausgenommen; ein Zurückrollen des ganzen
+  Systems kommt erst mit Btrfs-Snapshots.
 - Jede Sicherheitskorrektur muss Veyra selbst bauen und ausliefern.
 - Bit-identische Builds sind für einzelne Pakete das Ziel; Abweichungen werden dokumentiert,
   nicht verschwiegen.

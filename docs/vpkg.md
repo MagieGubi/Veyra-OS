@@ -1,4 +1,4 @@
-# VPKG 0.2: Bedienung
+# VPKG 0.3: Bedienung
 
 `vpkg` ist die Paketverwaltung von Veyra OS (`packages/base/vpkg/vpkg`, Python 3.11+,
 nur Standardbibliothek, dazu `zstd`, `tar` und `openssl`). Sie installiert, aktualisiert
@@ -7,7 +7,7 @@ weiß zu jeder Datei, zu welchem Paket sie gehört.
 
 | Befehl | Was er tut |
 | --- | --- |
-| `vpkg install PAKET...` | `.vpkg`-Dateien oder Namen aus dem Repository installieren; fehlende Abhängigkeiten kommen aus dem Repository dazu. Ist ein Paket schon installiert, wird es aktualisiert (alte Dateien, die in der neuen Version fehlen, werden entfernt). |
+| `vpkg install PAKET...` | `.vpkg`-Dateien oder Namen aus dem Repository installieren; fehlende Abhängigkeiten kommen aus dem Repository dazu. Ist ein Paket schon installiert, wird es aktualisiert (alte Dateien, die in der neuen Version fehlen, werden entfernt). Eine ältere Version als die installierte nur mit `--allow-downgrade`. |
 | `vpkg upgrade` | Alle installierten Pakete, für die das Repository eine neuere Version hat, aktualisieren. |
 | `vpkg remove NAME...` | Pakete entfernen. Abgelehnt, solange ein anderes Paket sie braucht. |
 | `vpkg list` | Installierte Pakete mit Version. |
@@ -81,17 +81,35 @@ in `/etc/vpkg/repo` oder wird mit `--repo` angegeben. Das CI stellt bei jedem La
 Repository mit allen Paketen als Artefakt `veyra-repo` bereit; öffentlich gehostet ist
 es noch nicht.
 
+Ab VPKG 0.3 ist auch der Index geschützt (Aufbau: [vpkg-format.md](vpkg-format.md#repository-index)):
+
+- Liegen Schlüssel in `/etc/vpkg/keys`, muss `index.toml.sig` eine gültige Ed25519-Signatur
+  des Index sein. Ein unsignierter oder veränderter Index wird abgelehnt.
+- Jeder Index trägt einen **Stand** (`stand = ZAHL`, im CI die Commit-Zeit). VPKG merkt sich
+  in `/var/lib/vpkg/repo-stand.json` je Quelle den höchsten signierten Stand und lehnt
+  einen älteren ab. So kann ein Spiegel keine alte Kopie mit bekannt fehlerhaften Paketen
+  als aktuell ausgeben. Ein signierter Index ohne Stand wird abgelehnt.
+- Jeder Eintrag wird geprüft: Paketname, Dateiname (nur ein Name, kein Pfad), Prüfsumme,
+  Version, Abhängigkeiten. Das geladene Paket muss genau dem Eintrag entsprechen (Name,
+  Version, Abhängigkeiten), sonst wird es abgelehnt, auch wenn es selbst gültig signiert ist.
+- Das Repository wird erst geladen, wenn es gebraucht wird (Paketname oder fehlende
+  Abhängigkeit). Eine lokale Paketdatei installiert sich auch ohne erreichbares Repository.
+
 ## Datenbank
 
 `/var/lib/vpkg/installed/NAME/manifest.toml` (und `install`, falls vorhanden) je
 installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgänge,
-`/var/lib/vpkg/txn/` gibt es nur während eines Vorgangs (siehe Transaktionen).
+`/var/lib/vpkg/txn/` gibt es nur während eines Vorgangs (siehe Transaktionen),
+`/var/lib/vpkg/repo-stand.json` hält den zuletzt angenommenen Index-Stand je Quelle.
 
-## Grenzen von 0.2
+## Grenzen von 0.3
 
 - Install-Skripte lassen sich nicht zurücknehmen (siehe oben).
 - Die Transaktion schützt vor Abbrüchen, nicht vor Fremdeingriffen: wer während eines
   Vorgangs selbst Dateien im System ändert, kann die Rücknahme stören (VPKG meldet das).
-- Der Repository-Index ist noch nicht signiert; Pakete selbst schon.
+- Der Index hat kein Ablaufdatum: ein Spiegel kann neue Stände zurückhalten (alte, aber
+  nicht ältere als die schon gesehenen ausliefern). Ein Ablaufdatum braucht eine
+  verlässliche Uhrzeit im System und folgt später.
+- Ohne Schlüssel in `/etc/vpkg/keys` wird weder Index noch Paket auf Signaturen geprüft.
 - Keine Versionsbedingungen in Abhängigkeiten (nur Namen), kein `pre_remove`.
 - Kernel und Kernelmodule sind noch kein Paket.

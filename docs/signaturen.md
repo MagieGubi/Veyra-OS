@@ -1,13 +1,14 @@
 # Paketsignaturen
 
 Veyra signiert jedes Paket mit einem Ed25519-Schlüssel. Die Signatur liegt als
-`PAKET.vpkg.sig` neben dem Paket und gilt für die ganze `.vpkg`-Datei.
+`PAKET.vpkg.sig` neben dem Paket und gilt für die ganze `.vpkg`-Datei. Seit VPKG 0.3 ist
+auch der Repository-Index signiert (`index.toml.sig`, siehe [vpkg.md](vpkg.md#repository)).
 
 | Teil | Ort |
 | --- | --- |
 | Öffentlicher Schlüssel | `packages/base/veyra-keyring/veyra-2026.pem`, im System `/etc/vpkg/keys/veyra-2026.pem` (Paket `veyra-keyring`) |
 | Privater Schlüssel | nur als GitHub-Secret `VPKG_SIGNING_KEY` (Repository-Einstellungen, Secrets and variables, Actions), nie im Repository |
-| Signieren | `build/scripts/sign-packages.sh`, im CI im Job „Abbild und Boot-Test“ |
+| Signieren | `build/scripts/sign-packages.sh` (Pakete und `index.toml`), im CI im Job „Abbild und Boot-Test“: Pakete vor dem Bau des Abbilds, der Index beim Zusammenstellen des Repositories |
 | Prüfen | `vpkg` (Pflicht, sobald ein Schlüssel in `/etc/vpkg/keys` liegt), `vpkg-verify --pubkey` |
 
 Ablauf im CI: Ist das Secret gesetzt, prüft `sign-packages.sh` zuerst, dass der private

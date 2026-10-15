@@ -540,13 +540,28 @@ jobs:
 
       - name: Paket-Repository zusammenstellen
         if: success()
+        env:
+          VPKG_SIGNING_KEY: ${{ secrets.VPKG_SIGNING_KEY }}
         run: |
           mkdir -p repo
           find basis extra -maxdepth 2 -name '*.vpkg' -not -path '*/selftest/*' -exec cp {} repo/ \;
           find basis extra -maxdepth 2 -name '*.vpkg.sig' -not -path '*/selftest/*' -exec cp {} repo/ \;
-          python3 packages/base/vpkg/vpkg index repo
+          # Stand des Index = Commit-Zeit: steigt mit jedem Commit, VPKG lehnt aeltere Indizes ab.
+          python3 packages/base/vpkg/vpkg index --stand "$(git log -1 --format=%ct)" repo
+          if [ -n "$VPKG_SIGNING_KEY" ]; then
+            umask 077
+            key=$RUNNER_TEMP/veyra-signing-key.pem
+            printf '%s\n' "$VPKG_SIGNING_KEY" > "$key"
+            build/scripts/sign-packages.sh "$key" repo
+            rm -f "$key"
+            # Gegenprobe wie ein Veyra-System: Index-Signatur, Stand und ein Paket aus dem Repository.
+            mkdir -p "$RUNNER_TEMP/probe/var/lib/vpkg/installed"
+            python3 packages/base/vpkg/vpkg --root "$RUNNER_TEMP/probe" \
+              --pubkey packages/base/veyra-keyring/veyra-2026.pem install --no-scripts \
+              --repo "$PWD/repo" veyra-release
+          fi
           (cd repo && sha256sum ./*.vpkg > SHA256SUMS)
-          echo "Pakete: $(ls repo/*.vpkg | wc -l), signiert: $(ls repo/*.vpkg.sig 2>/dev/null | wc -l)"
+          echo "Pakete: $(ls repo/*.vpkg | wc -l), signiert: $(ls repo/*.vpkg.sig 2>/dev/null | wc -l), Index signiert: $([ -f repo/index.toml.sig ] && echo ja || echo nein)"
       - uses: actions/upload-artifact@v4
         if: success()
         with:

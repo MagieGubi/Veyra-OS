@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-# vpkg 0.1: Paketverwaltung von Veyra OS.
+# vpkg 0.3: Paketverwaltung von Veyra OS.
 #
 # Installiert, aktualisiert und entfernt .vpkg-Pakete (Format: docs/vpkg-format.md),
 # loest Abhaengigkeiten auf und fuehrt Buch darueber, welche Datei zu welchem Paket gehoert.
 #
-#   vpkg [--root DIR] install [--repo QUELLE] [--overwrite] [--no-deps] [--no-scripts] PAKET...
+#   vpkg [--root DIR] install [--repo QUELLE] [--overwrite] [--no-deps] [--no-scripts]
+#                             [--allow-downgrade] PAKET...
 #   vpkg [--root DIR] upgrade [--repo QUELLE]
 #   vpkg [--root DIR] remove [--no-deps] NAME...
 #   vpkg [--root DIR] list | info NAME | files NAME | owner PFAD | check [NAME...]
 #   vpkg [--root DIR] register PAKET.vpkg...      (schon ausgepackte Pakete eintragen)
 #   vpkg [--root DIR] recover                      (unterbrochenen Vorgang zuruecknehmen)
-#   vpkg index VERZEICHNIS                         (index.toml fuer ein Paket-Repository)
+#   vpkg index [--stand ZAHL] VERZEICHNIS          (index.toml fuer ein Paket-Repository)
 #
 # PAKET ist eine .vpkg-Datei oder ein Paketname aus dem Repository.
 # QUELLE ist ein Verzeichnis oder eine http(s)-Adresse mit index.toml; ohne --repo gilt
@@ -18,6 +19,10 @@
 #
 # Signaturen: Liegen oeffentliche Schluessel in ROOT/etc/vpkg/keys/*.pem (oder wird
 # --pubkey angegeben), muss jedes Paket eine gueltige Ed25519-Signatur PAKET.vpkg.sig haben.
+# Ab 0.3 gilt das auch fuer den Repository-Index (index.toml.sig). Sein Stand (stand = Zahl)
+# darf nicht hinter den zuletzt angenommenen zuruecklaufen (ROOT/var/lib/vpkg/repo-stand.json),
+# sonst koennte ein Spiegel alte, bekannt fehlerhafte Pakete als aktuell ausgeben.
+# Aeltere Versionen als die installierte werden nur mit --allow-downgrade eingespielt.
 #
 # Transaktionen (ab 0.2): install, upgrade, remove und register schreiben jede Aenderung
 # erst in ein Journal (ROOT/var/lib/vpkg/txn) und sichern ersetzte oder geloeschte Dateien.
@@ -34,13 +39,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import urllib.parse
 import urllib.request
 
-VERSION = "0.2"
+VERSION = "0.3"
 DB = "var/lib/vpkg"
 TXN = DB + "/txn"
+REPO_STAND = DB + "/repo-stand.json"
+FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*\.vpkg$")
 MODE_RE = re.compile(r"^[0-7]{1,4}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 KEYS = "etc/vpkg/keys"
@@ -58,6 +66,17 @@ def info(msg):
 
 def warn(msg):
     print(f"vpkg: Warnung: {msg}", file=sys.stderr, flush=True)
+
+
+def signature_ok(path, sig, keys):
+    """True, wenn sig eine gueltige Ed25519-Signatur von path mit einem der Schluessel ist."""
+    for k in keys:
+        r = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", k, "-rawin",
+                            "-in", path, "-sigfile", sig],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0:
+            return True
+    return False
 
 
 def sha256_file(path):
@@ -139,13 +158,8 @@ class Paket:
         sig = self.path + ".sig"
         if not os.path.isfile(sig):
             raise Fehler(f"{self.path}: Signatur fehlt (Schluessel sind eingerichtet)")
-        for k in keys:
-            r = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", k, "-rawin",
-                                "-in", self.path, "-sigfile", sig],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if r.returncode == 0:
-                return
-        raise Fehler(f"{self.path}: Signatur ungueltig")
+        if not signature_ok(self.path, sig, keys):
+            raise Fehler(f"{self.path}: Signatur ungueltig")
 
     def verify_manifest(self):
         """Prueft Aufbau und Werte des Manifests, bevor irgendetwas davon benutzt wird."""
@@ -529,14 +543,93 @@ def provides_map(pkgs):
 # ---------------------------------------------------------------- Repository
 
 class Repo:
-    def __init__(self, src, tmp):
+    def __init__(self, src, tmp, system=None):
         self.src = src.rstrip("/")
         self.remote = urllib.parse.urlparse(self.src).scheme in ("http", "https")
         self.tmp = tmp
         idx = self.fetch("index.toml")
-        with open(idx, "rb") as f:
-            data = tomllib.load(f)
-        self.pkgs = {p["name"]: p for p in data.get("package", [])}
+        keys = system.keys if system else []
+        self.signed = False
+        if keys:
+            sig = self.fetch("index.toml.sig", optional=True)
+            if sig is None:
+                raise Fehler(f"{self.src}: Repository-Index ist nicht signiert (index.toml.sig fehlt, "
+                             "Schluessel sind eingerichtet)")
+            if not signature_ok(idx, sig, keys):
+                raise Fehler(f"{self.src}: Signatur des Repository-Index ungueltig")
+            self.signed = True
+        try:
+            with open(idx, "rb") as f:
+                data = tomllib.load(f)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+            raise Fehler(f"{self.src}: Repository-Index nicht lesbar ({e})")
+        self.pkgs = self.check_index(data)
+        self.stand = data.get("stand")
+        if self.signed and self.stand is None:
+            raise Fehler(f"{self.src}: signierter Repository-Index ohne Stand (stand = ...)")
+        if system is not None and self.stand is not None:
+            self.check_stand(system)
+
+    def check_index(self, data):
+        """Prueft Aufbau und Werte des Index, bevor etwas daraus benutzt wird."""
+        if data.get("format") != 1:
+            raise Fehler(f"{self.src}: unbekanntes Index-Format {data.get('format')!r}")
+        st = data.get("stand")
+        if st is not None and (not isinstance(st, int) or isinstance(st, bool) or st < 0):
+            raise Fehler(f"{self.src}: ungueltiger Index-Stand {st!r}")
+        entries = data.get("package", [])
+        if not isinstance(entries, list):
+            raise Fehler(f"{self.src}: Index: 'package' ist keine Liste")
+        pkgs = {}
+        for e in entries:
+            if not isinstance(e, dict):
+                raise Fehler(f"{self.src}: Index: ungueltiger Eintrag")
+            n = e.get("name")
+            if not isinstance(n, str) or not NAME_RE.match(n):
+                raise Fehler(f"{self.src}: Index: ungueltiger Paketname {n!r}")
+            if n in pkgs:
+                raise Fehler(f"{self.src}: Index: {n} steht doppelt drin")
+            fn = e.get("filename")
+            if not isinstance(fn, str) or not FILENAME_RE.match(fn):
+                raise Fehler(f"{self.src}: Index: {n}: ungueltiger Dateiname {fn!r}")
+            if not isinstance(e.get("sha256"), str) or not SHA_RE.match(e["sha256"]):
+                raise Fehler(f"{self.src}: Index: {n}: ungueltige Pruefsumme")
+            for k in ("version", "release"):
+                if not isinstance(e.get(k), (str, int)) or str(e[k]) == "":
+                    raise Fehler(f"{self.src}: Index: {n}: Angabe '{k}' fehlt")
+            for k in ("depends", "provides", "conflicts"):
+                v = e.get(k, [])
+                if not isinstance(v, list) or not all(isinstance(x, str) and NAME_RE.match(x) for x in v):
+                    raise Fehler(f"{self.src}: Index: {n}: ungueltige Liste '{k}'")
+            pkgs[n] = e
+        return pkgs
+
+    def check_stand(self, system):
+        """Der Stand eines signierten Index darf nicht zuruecklaufen (Schutz gegen alte Kopien)."""
+        f = system.path(REPO_STAND)
+        try:
+            with open(f, encoding="utf-8") as fh:
+                seen = json.load(fh)
+            if not isinstance(seen, dict):
+                seen = {}
+        except FileNotFoundError:
+            seen = {}
+        except ValueError:
+            raise Fehler(f"/{REPO_STAND} ist beschaedigt (bitte pruefen)")
+        old = seen.get(self.src)
+        if isinstance(old, int) and self.stand < old:
+            raise Fehler(f"{self.src}: Repository-Index ist aelter als der zuletzt angenommene "
+                         f"(Stand {self.stand} < {old}); veraltete oder zurueckgespielte Kopie?")
+        if self.signed and (old is None or self.stand > old):
+            # Nur signierte Staende merken: sonst koennte ein unsignierter Index mit riesigem
+            # Stand kuenftige Aktualisierungen blockieren.
+            seen[self.src] = self.stand
+            tmp = f + ".neu"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(seen, fh, indent=1, sort_keys=True)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, f)
 
     def fetch(self, name, optional=False):
         if not self.remote:
@@ -568,6 +661,20 @@ class Repo:
         return path
 
 
+class LazyRepo:
+    """Laedt (und prueft) den Repository-Index erst, wenn er gebraucht wird: eine lokale
+    Paketdatei ohne fehlende Abhaengigkeiten kommt ohne Repository aus."""
+
+    def __init__(self, src, tmp, system):
+        self._args = (src, tmp, system)
+        self._repo = None
+
+    def __getattr__(self, name):
+        if self._repo is None:
+            self._repo = Repo(*self._args)
+        return getattr(self._repo, name)
+
+
 def repo_source(args, system):
     if args.repo:
         return args.repo
@@ -582,6 +689,11 @@ def repo_source(args, system):
 
 def cmd_index(args):
     d = args.dir
+    stand = args.stand
+    if stand is None:
+        stand = int(os.environ.get("SOURCE_DATE_EPOCH") or time.time())
+    if stand < 0:
+        raise Fehler("--stand muss >= 0 sein")
     entries = []
     for fn in sorted(os.listdir(d)):
         if not fn.endswith(".vpkg"):
@@ -596,6 +708,7 @@ def cmd_index(args):
         raise Fehler("mehrere Versionen im selben Repository: " + ", ".join(sorted(dup)))
     with open(os.path.join(d, "index.toml.neu"), "w") as f:
         f.write("# VPKG-Repository-Index (erzeugt von vpkg index)\nformat = 1\n")
+        f.write(f"stand = {stand}\n")
         for m, fn, sha in entries:
             f.write("\n[[package]]\n")
             f.write(f"name = {toml_str(m['name'])}\n")
@@ -615,8 +728,15 @@ def resolve(system, wanted, repo, tmp, no_deps):
     """Liefert die zu installierenden Pakete (Paket-Objekte), Abhaengigkeiten zuerst."""
     chosen = {}          # Name -> Paket
 
-    def load(path):
+    def load(path, from_repo=None):
         p = Paket(path, tmp, system.keys)
+        if from_repo is not None:
+            # Das Paket muss genau das sein, was der (signierte) Index verspricht.
+            e = repo.pkgs[from_repo]
+            if p.name != from_repo or fullver(p.m) != fullver(e) \
+                    or p.m.get("depends", []) != e.get("depends", []):
+                raise Fehler(f"{e['filename']}: Paket passt nicht zum Repository-Index "
+                             f"({p.name} {fullver(p.m)} statt {from_repo} {fullver(e)})")
         if p.name in chosen:
             raise Fehler(f"{p.name} ist doppelt angegeben")
         chosen[p.name] = p
@@ -631,7 +751,7 @@ def resolve(system, wanted, repo, tmp, no_deps):
                 raise Fehler(f"{w}: kein Repository angegeben (--repo oder {REPO_FILE})")
             if w not in repo.pkgs:
                 raise Fehler(f"{w}: nicht im Repository")
-            load(repo.get(w))
+            load(repo.get(w), w)
 
     # Fehlende Abhaengigkeiten aus dem Repository nachladen.
     while True:
@@ -647,7 +767,7 @@ def resolve(system, wanted, repo, tmp, no_deps):
             n = repo_have[d]
             if n not in chosen:
                 info(f"   + {n} (Abhaengigkeit)")
-                load(repo.get(n))
+                load(repo.get(n), n)
 
     # Konflikte
     after = {**system.installed, **{n: p.m for n, p in chosen.items()}}
@@ -810,7 +930,7 @@ def cmd_install(args, system, upgrade_only=False):
     system.lock()
     with tempfile.TemporaryDirectory(prefix="vpkg.") as tmp:
         src = repo_source(args, system)
-        repo = Repo(src, tmp) if src else None
+        repo = LazyRepo(src, tmp, system) if src else None
         wanted = args.packages
         if upgrade_only:
             if repo is None:
@@ -821,6 +941,12 @@ def cmd_install(args, system, upgrade_only=False):
                 info("Alles aktuell.")
                 return 0
         pkgs = resolve(system, wanted, repo, tmp, args.no_deps)
+        if not args.allow_downgrade:
+            for p in pkgs:
+                old = system.installed.get(p.name)
+                if old is not None and vercmp(fullver(p.m), fullver(old)) < 0:
+                    raise Fehler(f"{p.name}: {fullver(p.m)} ist aelter als die installierte Version "
+                                 f"{fullver(old)} (absichtlich zurueckstufen: --allow-downgrade)")
         file_conflicts(system, pkgs, args.overwrite)
 
         def apply(txn):
@@ -1037,6 +1163,8 @@ def main(argv=None):
         p.add_argument("--overwrite", action="store_true", help="Dateikonflikte ueberschreiben")
         p.add_argument("--no-deps", action="store_true", help="Abhaengigkeiten nicht pruefen")
         p.add_argument("--no-scripts", action="store_true", help="Install-Skripte nicht ausfuehren")
+        p.add_argument("--allow-downgrade", action="store_true",
+                       help="aeltere Versionen als die installierte zulassen")
 
     p = sub.add_parser("install", help="Pakete installieren oder aktualisieren")
     inst_opts(p)
@@ -1060,6 +1188,9 @@ def main(argv=None):
     p.add_argument("packages", nargs="+")
     sub.add_parser("recover", help="unterbrochenen Vorgang zuruecknehmen")
     p = sub.add_parser("index", help="index.toml fuer ein Repository-Verzeichnis schreiben")
+    p.add_argument("--stand", type=int,
+                   help="Stand des Index (Zahl, muss mit jeder Ausgabe steigen; Standard: "
+                        "SOURCE_DATE_EPOCH, sonst die aktuelle Zeit)")
     p.add_argument("dir")
     args = ap.parse_args(argv)
 

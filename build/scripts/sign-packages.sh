@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Signiert .vpkg-Dateien mit dem Veyra-Paketschluessel (Ed25519) und legt je Paket
-# PAKET.vpkg.sig daneben. Vorher wird geprueft, dass der private Schluessel zum
+# Signiert .vpkg-Dateien und Repository-Indizes (index.toml) mit dem Veyra-Paketschluessel
+# (Ed25519) und legt je Datei DATEI.sig daneben. Vorher wird geprueft, dass der private Schluessel zum
 # oeffentlichen Schluessel im Repository passt (packages/base/veyra-keyring/veyra-2026.pem).
 #
 # Aufruf: sign-packages.sh PRIVATER-SCHLUESSEL.pem VERZEICHNIS...
-#   Alle .vpkg-Dateien in den Verzeichnissen (auch in Unterordnern) werden signiert.
+#   Alle .vpkg-Dateien und index.toml in den Verzeichnissen (auch in Unterordnern) werden
+#   signiert.
 set -euo pipefail
 die() { echo "sign-packages: $*" >&2; exit 1; }
 [ $# -ge 2 ] || die "Aufruf: sign-packages.sh SCHLUESSEL.pem VERZEICHNIS..."
@@ -19,5 +20,5 @@ while IFS= read -r -d '' p; do
   openssl pkeyutl -verify -pubin -inkey "$pub" -rawin -in "$p" -sigfile "$p.sig" >/dev/null \
     || die "Signatur nicht pruefbar: $p"
   n=$((n + 1))
-done < <(find "$@" -name '*.vpkg' -print0 | LC_ALL=C sort -z)
-echo "sign-packages: $n Paket(e) signiert"
+done < <(find "$@" \( -name '*.vpkg' -o -name index.toml \) -print0 | LC_ALL=C sort -z)
+echo "sign-packages: $n Datei(en) signiert"
