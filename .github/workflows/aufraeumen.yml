@@ -1,0 +1,45 @@
+# Loescht alte CI-Artefakte, damit der Speicher fuer Artefakte nicht voll laeuft.
+# Laeuft NUR per Knopfdruck (Actions -> "Artefakte aufraeumen" -> "Run workflow").
+# Behalten werden alle Artefakte der neuesten vollstaendigen Laeufe (mit Live-ISO);
+# alles andere wird endgueltig geloescht.
+name: Artefakte aufraeumen
+
+on:
+  workflow_dispatch:
+    inputs:
+      behalten:
+        description: 'Wie viele vollstaendige Laeufe (mit Live-ISO) behalten'
+        default: '1'
+        required: true
+
+permissions:
+  actions: write
+
+jobs:
+  aufraeumen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Alte Artefakte loeschen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEHALTEN: ${{ inputs.behalten }}
+        run: |
+          set -euo pipefail
+          case "$BEHALTEN" in ''|*[!0-9]*) echo "behalten muss eine Zahl sein" >&2; exit 1;; esac
+          api="repos/${GITHUB_REPOSITORY}/actions/artifacts"
+          gh api --paginate "$api?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false) | [.id, .workflow_run.id, .name, .size_in_bytes, .created_at] | @tsv' \
+            > alle.tsv
+          # neueste Laeufe mit Live-ISO behalten
+          awk -F'\t' '$3 == "veyra-live-iso" {print $5 "\t" $2}' alle.tsv | sort -r | cut -f2 \
+            | awk '!s[$0]++' | head -n "$BEHALTEN" > behalten.txt
+          echo "Behalten werden die Laeufe:"; cat behalten.txt
+          [ -s behalten.txt ] || [ "$BEHALTEN" = 0 ] || { echo "kein Lauf mit Live-ISO gefunden, breche ab" >&2; exit 1; }
+          frei=0; n=0
+          while IFS=$'\t' read -r id run name groesse _; do
+            if grep -qx "$run" behalten.txt; then continue; fi
+            echo "loesche $name aus Lauf $run"
+            gh api -X DELETE "$api/$id" >/dev/null
+            frei=$((frei + groesse)); n=$((n + 1))
+          done < alle.tsv
+          echo "Geloescht: $n Artefakte, $((frei / 1048576)) MiB"
