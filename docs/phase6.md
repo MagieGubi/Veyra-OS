@@ -249,3 +249,25 @@ stammen aus den Kernel-Zeitstempeln im Log.
 
 Verbesserung 4: Repository-Index signieren und ältere Versionen ablehnen. Mit Netzwerk
 kann VPKG dann Pakete direkt aus einem Online-Repository laden.
+
+---
+
+# Schritt 3: VPKG 0.3, signierter Repository-Index, keine offenen Ports (15.10.2026)
+
+Umgesetzt sind ROADMAP-Aufgaben P0-1 und P0-2 (Details, Akzeptanzkriterien und Risiken in
+[ROADMAP.md](../ROADMAP.md), Abschlussbericht in [bericht-p0.md](bericht-p0.md)).
+
+CI-Lauf [38697548625](https://github.com/MagieGubi/Veyra-OS/actions/runs/38697548625)
+(Commit 0a60bbc): **alle 12 Jobs grün**.
+
+| | Abbild (virtuelle Festplatte) | Live-ISO (virtuelle CD) |
+| --- | --- | --- |
+| VPKG-Tests | 25 von 25 bestanden | – |
+| Repository | 73 Pakete signiert, Index signiert, Gegenprobe-Installation ok | – |
+| Selbsttest | OK (vpkg 0.3, 73 Pakete, Signaturen, Rücknahme, Netzwerk, Namensauflösung, offene Ports, Dienste) | OK, gleiche Prüfungen |
+| Offene Ports | ok (nur Loopback) | ok (nur Loopback) |
+| Login ab QEMU-Start | 7,2 s | 6,4 s |
+| systemd-Startzeit | 1,187 s Kernel + 1,348 s Userspace | 1,112 s + 1,331 s |
+| Herunterfahren | sauber, 1,4 s | sauber, 1,0 s |
+
+Alles nur in QEMU mit KVM, nicht in VirtualBox und nicht auf echter Hardware.

@@ -1,6 +1,6 @@
 # Veyra OS: Roadmap
 
-Stand: 14.10.2026. Diese Datei beschreibt den **tatsächlichen** Stand. Eine Aufgabe gilt
+Stand: 15.10.2026. Diese Datei beschreibt den **tatsächlichen** Stand. Eine Aufgabe gilt
 erst als erledigt, wenn ihre Akzeptanzkriterien nachweislich erfüllt sind (CI-Lauf,
 Testausgabe). Ausführliche Begründungen und Messwerte: [docs/phase6.md](docs/phase6.md).
 
@@ -14,8 +14,8 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 | Toolchain, Basissystem (68 Pakete, glibc bis systemd) | aus Quellcode gebaut, Quellen gepinnt und geprüft | CI, `build/scripts/check-pinned.sh` |
 | Kernel 6.18.56-veyra2 | zwei unabhängige Builds bit-identisch | CI-Job `kernel-reproducible` |
 | Boot | UEFI, Kernel direkt als `BOOTX64.EFI`, ohne Bootloader und Initramfs; Live-ISO mit eigenem Init (`kernel/live/init.c`) | QEMU im CI (Festplatte und CD) |
-| VPKG | Installieren, Entfernen, Abhängigkeiten, Ed25519-Signaturen, Transaktionen mit Rücknahme | 25 Tests in `tests/vpkg/vpkg-test.sh` (einer nur ohne root) und 6 in `run.sh`, Selbsttest im gebooteten System |
-| Netzwerk | Kabel per DHCP, Namensauflösung | Selbsttest in QEMU |
+| VPKG | Installieren, Entfernen, Abhängigkeiten, Ed25519-Signaturen, Transaktionen mit Rücknahme, signierter Repository-Index mit Stand- und Downgrade-Schutz (VPKG 0.3) | 25 Tests in `tests/vpkg/vpkg-test.sh` (einer nur ohne root) und 6 in `run.sh`, Selbsttest im gebooteten System |
+| Netzwerk | Kabel per DHCP, Namensauflösung, außer Loopback keine offenen Ports | Selbsttest in QEMU |
 | Echte Hardware | Treiber und USB-Test vorbereitet, **nie auf echter Hardware gestartet** | – |
 | Installation auf Festplatte, Updates, Desktop | fehlen | – |
 
@@ -23,7 +23,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 
 ## P0: Kritische Fehler, Build-Fehler, Sicherheit
 
-### P0-1 Repository-Index signieren, alte Indizes und Downgrades ablehnen 🟡
+### P0-1 Repository-Index signieren, alte Indizes und Downgrades ablehnen ✅
 - **Ziel/Begründung:** Der Index war unsigniert und ungeprüft. Ein Spiegel hätte alte, gültig
   signierte Pakete mit bekannten Fehlern als aktuell ausgeben, ein Paket hinter einem
   fremden Namen ausliefern oder über `vpkg install NAME` eine ältere Version einspielen
@@ -42,10 +42,12 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Akzeptanz:** unsignierter, veränderter, älterer und standloser Index abgelehnt;
   Pfad im Dateinamen, falsches Paket hinter Eintrag, kaputte Prüfsumme abgelehnt;
   Downgrade nur mit Option; CI-Repository hat `index.toml.sig` und die Gegenprobe läuft.
-- **Testnachweis:** Tests 20 bis 23 in `tests/vpkg/vpkg-test.sh` (lokal grün, 14.10.2026);
-  CI-Lauf steht aus.
+- **Testnachweis:** Tests 21 bis 24 in `tests/vpkg/vpkg-test.sh`, im CI-Lauf [38697548625](https://github.com/MagieGubi/Veyra-OS/actions/runs/38697548625) grün
+  („Alle 25 VPKG-Tests bestanden“). Repository-Schritt im selben Lauf: „Pakete: 73,
+  signiert: 73, Index signiert: ja“, Gegenprobe `vpkg install --repo … veyra-release` aus
+  dem signierten Index erfolgreich.
 
-### P0-2 Keine offenen Ports im Netz 🟡
+### P0-2 Keine offenen Ports im Netz ✅
 - **Ziel/Begründung:** systemd-resolved beantwortet standardmäßig LLMNR (Port 5355) auf
   jeder Netzwerkkarte; Veyra wäre damit im lokalen Netz ansprechbar, ohne dass es einen
   Grund dafür gibt.
@@ -53,8 +55,8 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   LLMNR und mDNS aus), `packages/test/veyra-selftest/recipe.sh` (Prüfung mit `ss`).
 - **Akzeptanz:** Selbsttest meldet „Offene Ports: ok“, außer Loopback nur die Antwort-Ports
   der DHCP-Clients (UDP 68/546).
-- **Testnachweis:** Filter mit Beispielausgabe von `ss` lokal geprüft (erkennt 5355);
-  Selbsttest im CI steht aus.
+- **Testnachweis:** CI-Lauf [38697548625](https://github.com/MagieGubi/Veyra-OS/actions/runs/38697548625): „VEYRA-SELBSTTEST: Offene Ports: ok (nur Loopback)“ im
+  Abbild und in der Live-ISO (nur QEMU, nicht auf echter Hardware).
 
 ### P0-3 Root ohne Passwort im Abbild ⬜
 - **Ziel/Begründung:** Das Entwicklungsabbild (auch der USB-Stick für den Hardware-Test und
@@ -77,7 +79,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   „vpkg Abbruch und Rücknahme: ok“ in CI-Lauf 38451902869 (Abbild und Live-ISO).
 
 ### P1-2 Strenge Manifestprüfung ✅
-- **Nachweis:** Tests 19 und 24 (manipulierte Manifeste, eigene Pakete), CI-Lauf 38451902869.
+- **Nachweis:** Tests 20 und 25 (manipulierte Manifeste, eigene Pakete), CI-Läufe 38451902869 und 38697548625.
 
 ### P1-3 Versionsbedingungen in Abhängigkeiten ⬜
 - **Ziel/Begründung:** `depends` kennt nur Namen. Ein Paket, das `liba>=2` braucht, lässt
