@@ -1,6 +1,6 @@
 # Veyra OS: Roadmap
 
-Stand: 15.10.2026. Diese Datei beschreibt den **tatsächlichen** Stand. Eine Aufgabe gilt
+Stand: 09.11.2026. Diese Datei beschreibt den **tatsächlichen** Stand. Eine Aufgabe gilt
 erst als erledigt, wenn ihre Akzeptanzkriterien nachweislich erfüllt sind (CI-Lauf,
 Testausgabe). Ausführliche Begründungen und Messwerte: [docs/phase6.md](docs/phase6.md).
 
@@ -162,7 +162,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   Meldung und einen konsistenten Zustand.
 - **Testnachweis:** noch keiner.
 
-### P1-7 Diagnose bei fehlgeschlagenem Start 🟡
+### P1-7 Diagnose bei fehlgeschlagenem Start ✅
 - **Ziel/Begründung:** Schlug der Boot-Test fehl, gab es nur das rohe Konsolen-Log mit
   hunderten Zeilen. Wie weit der Start kam und woran er scheiterte, musste man selbst
   heraussuchen; für Logs vom echten Rechner gab es gar keine Auswertung.
@@ -179,7 +179,8 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   falschen Fehlerhinweis außer echten Befunden.
 - **Testnachweis:** lokal 9 von 9 Diagnose-Tests, shellcheck sauber. Auf die echten
   Konsolen-Logs aus Lauf 38697548625 angewandt: Stufe „Selbsttest“, einziger Hinweis ist
-  ein echter Befund (`regulatory.db` fehlt, gehört zu P2-3/P2-4). CI-Lauf steht aus.
+  ein echter Befund (`regulatory.db` fehlt, gehört zu P2-3/P2-4). Im CI-Lauf [42512193788](https://github.com/MagieGubi/Veyra-OS/actions/runs/42512193788):
+  „Alle 9 Diagnose-Tests bestanden.“; Abbild und Live-ISO booten weiter mit Selbsttest OK.
 
 ## P2: Hardware und Netzwerk
 
