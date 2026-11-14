@@ -21,8 +21,9 @@ Intel-Grafik aus) und NVIDIA. Beides folgt mit eigenen Paketen.
 
 ## Ablauf
 
-1. Abbild `veyra-core-0.1.img.zst` aus dem Artefakt `veyra-core-0.1` des letzten CI-Laufs
-   herunterladen und entpacken (z. B. mit 7-Zip, das `.zst` kann).
+1. **Testabbild** `veyra-core-0.1-test.img.zst` aus dem Artefakt `veyra-core-0.1-test` des
+   letzten CI-Laufs herunterladen (nicht das Entwicklungsabbild: dort ist root ohne
+   Passwort) und entpacken (z. B. mit 7-Zip, das `.zst` kann).
 2. Mit balenaEtcher oder Rufus (Modus „DD-Abbild“) auf einen USB-Stick mit mindestens
    8 GB schreiben. Alles auf dem Stick wird dabei gelöscht.
    Fragt Windows danach, ob ein Laufwerk formatiert werden soll: **Abbrechen** (das ist die
@@ -30,8 +31,11 @@ Intel-Grafik aus) und NVIDIA. Beides folgt mit eigenen Paketen.
 3. Secure Boot im BIOS ausschalten (MSI: beim Start `Entf` drücken, Reiter „Security“).
    Der Veyra-Kernel ist nicht von Microsoft signiert und startet sonst nicht.
 4. Stick einstecken, beim Start `F11` drücken (Bootmenü) und den USB-Stick wählen.
-5. Anmelden als `root` ohne Passwort. Etwa 20 s nach dem Start läuft der Selbsttest und
-   zeigt seine Ergebnisse auf dem Bildschirm.
+5. Beim ersten Start fragt die Ersteinrichtung auf dem Bildschirm nach einem root-Passwort
+   (mindestens 8 Zeichen, zweimal) und optional nach einem eigenen Benutzer. Erst danach
+   ist die Anmeldung möglich; root ist bis dahin gesperrt. Etwa 20 s nach dem Start läuft
+   der Selbsttest und schreibt seine Ergebnisse auf den Stick (auch während die
+   Ersteinrichtung noch wartet).
 6. Mit `poweroff` ausschalten, Windows starten, im Laufwerk `VEYRA-DATEN` die Dateien
    `veyra-messung.txt` und `kernel-log.txt` öffnen.
 7. Optional, in Git Bash im geklonten Repository: `bash image/boot-diagnose.sh

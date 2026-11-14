@@ -1,16 +1,17 @@
 # Selbsttest fuer das Entwicklungsabbild: laeuft einmal nach dem Start, prueft die
 # Paketdatenbank (vpkg check), installiert und entfernt das Testpaket vpkg-demo und prueft
-# Netzwerk und fehlgeschlagene Dienste.
+# Netzwerk, Konten und Rechte (veyra-kontencheck, je nach Variante dev/test) und
+# fehlgeschlagene Dienste.
 # Ergebnis auf der seriellen Konsole: "VEYRA-SELBSTTEST: OK" oder "VEYRA-SELBSTTEST: FEHLER".
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.5
+pkgver=0.6
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg systemd bash iproute2 veyra-netzwerk)
+depends=(vpkg systemd bash iproute2 veyra-netzwerk veyra-konten)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -104,6 +105,22 @@ if [ -z "$offen" ]; then
 else
   log "Offene Ports: FEHLER, von aussen erreichbar: ${offen//$'\n'/, }"
   fail=1
+fi
+# Konten und Rechte passend zur Variante (Entwicklungs- oder Testabbild).
+if veyra-kontencheck > /run/veyra-kontencheck.log 2>&1; then
+  log "Konten und Rechte: ok (Variante $(cat /etc/veyra/variante), $(grep -c '^ok:' /run/veyra-kontencheck.log) Pruefungen)"
+else
+  log "Konten und Rechte: FEHLER"
+  grep '^FEHLER' /run/veyra-kontencheck.log | sed 's/^/VEYRA-SELBSTTEST:   /'
+  fail=1
+fi
+if [ -e /etc/veyra/einrichtung-noetig ]; then
+  # Im Testabbild wartet die Ersteinrichtung an Konsole 1 auf Eingaben.
+  if systemctl is-active -q veyra-einrichtung.service; then
+    log "Ersteinrichtung: wartet an Konsole 1 auf das root-Passwort"
+  else
+    log "Ersteinrichtung: FEHLER (Dienst laeuft nicht: $(systemctl is-active veyra-einrichtung.service))"; fail=1
+  fi
 fi
 # Kein Dienst darf beim Start fehlgeschlagen sein.
 kaputt=$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}')

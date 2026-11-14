@@ -20,9 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Werkzeuge installieren
-        run: sudo apt-get update && sudo apt-get install -y zstd shellcheck
+        run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh packages/base/veyra-konten/veyra-*
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -31,6 +31,10 @@ jobs:
           bash tests/vpkg/vpkg-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
         run: bash tests/boot/diagnose-test.sh
+      - name: Konten testen (Ersteinrichtung, Kontenpruefung)
+        run: sudo bash tests/konten/konten-test.sh
+      - name: Abbild-Varianten testen (dev und test, mit Probe-System)
+        run: sudo bash tests/image/variante-test.sh
       - name: Rezepte und Quellenlisten pruefen
         run: |
           for r in packages/*/*/recipe.sh; do bash -n "$r"; done
@@ -478,9 +482,9 @@ jobs:
           pattern: pakete-4b-*
           path: basis
 
-      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, vpkg, Selbsttest)
+      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, vpkg, Selbsttest)
         run: |
-          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/vpkg packages/test/veyra-selftest; do
+          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/vpkg packages/test/veyra-selftest; do
             build/scripts/vpkg-build --srcdir "$PWD" --outdir extra "$r"
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
@@ -569,6 +573,33 @@ jobs:
         with:
           name: veyra-repo
           path: repo
+          retention-days: 7
+
+      # Testabbild fuer echte Rechner (USB-Stick): root gesperrt bis zur Ersteinrichtung an
+      # Konsole 1. Der Boot-Test laeuft ohne Anmeldung; der Selbsttest prueft die Konten.
+      - name: Testabbild bauen (VARIANTE=test)
+        if: success()
+        run: |
+          rm -f veyra-core-0.1.img veyra-core-0.1.vdi
+          sudo VARIANTE=test image/build-image.sh sys/veyra-stage4b-3.tar.zst k/kernel extra veyra-core-0.1-test.img basis
+          sudo chown "$(id -u):$(id -g)" veyra-core-0.1-test.img
+      - name: Boot-Test des Testabbilds und Selbsttest
+        if: success()
+        run: SELFTEST=1 image/boot-test.sh veyra-core-0.1-test.img boot-test.log 600
+      - name: Testabbild packen
+        if: success()
+        run: |
+          zstd -q -T0 -10 --rm veyra-core-0.1-test.img -o veyra-core-0.1-test.img.zst
+          sha256sum veyra-core-0.1-test.img.zst | tee SHA256SUMS-test
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: veyra-core-0.1-test
+          path: |
+            veyra-core-0.1-test.img.zst
+            boot-test.log
+            SHA256SUMS-test
+            docs/hardware-test.md
           retention-days: 7
 
   live-iso:

@@ -1,8 +1,11 @@
 # Veyra OS: Roadmap
 
-Stand: 09.11.2026. Diese Datei beschreibt den **tatsächlichen** Stand. Eine Aufgabe gilt
+Stand: 14.11.2026. Diese Datei beschreibt den **tatsächlichen** Stand. Eine Aufgabe gilt
 erst als erledigt, wenn ihre Akzeptanzkriterien nachweislich erfüllt sind (CI-Lauf,
 Testausgabe). Ausführliche Begründungen und Messwerte: [docs/phase6.md](docs/phase6.md).
+Gesamtanalyse: [docs/FULL_SYSTEM_AUDIT.md](docs/FULL_SYSTEM_AUDIT.md), Phasenplan:
+[docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md), Kurzstatus:
+[docs/SYSTEM_STATUS.md](docs/SYSTEM_STATUS.md).
 
 Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · 🔧 vorbereitet ·
 ⬜ offen
@@ -65,19 +68,30 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   Abbild und in der Live-ISO (nur QEMU, nicht auf echter Hardware). Der Filter erkannte
   lokal mit einer Beispielausgabe von `ss` den LLMNR-Port 5355.
 
-### P0-3 Root ohne Passwort im Abbild ⬜
-- **Ziel/Begründung:** Das Entwicklungsabbild (auch der USB-Stick für den Hardware-Test und
-  die Live-ISO) erlaubt die Anmeldung als root ohne Passwort. In der VM gewollt, auf einem
-  echten Rechner ein Risiko, sobald Netzwerk und Dienste dazukommen.
-- **Dateien:** `image/build-image.sh`, `image/build-iso.sh`, `docs/hardware-test.md`.
-- **Schritte:** Abbild-Variante „dev“ (wie heute, nur für CI und VM) und „test“ (root
-  gesperrt, Anmeldung nur an der lokalen Konsole mit einem beim ersten Start gesetzten
-  Passwort); Variante sichtbar in `/etc/issue`.
-- **Abhängigkeiten/Risiken:** `systemd-firstboot` ist im systemd-Paket abgeschaltet
-  (`-D firstboot=false`); der Boot-Test braucht weiter einen automatisierbaren Weg.
-- **Akzeptanz:** Im Test-Abbild ist `/etc/shadow` für root gesperrt; Boot-Test grün.
-- **Testnachweis:** noch keiner. Geplant: Selbsttest prüft das Passwortfeld von root je
-  Variante.
+### P0-3 Sichere Root-Konfiguration, Entwicklungs- und Testabbild getrennt 🟡
+- **Ziel/Begründung:** Jedes Abbild, auch der USB-Stick für den Hardware-Test, erlaubte die
+  Anmeldung als root ohne Passwort. In der VM gewollt, auf einem echten Rechner ein Risiko.
+- **Dateien:** `image/build-image.sh` (`VARIANTE=dev|test`), neues Paket
+  `packages/base/veyra-konten/` (`veyra-einrichtung`, `veyra-kontencheck`, Dienst an
+  Konsole 1), `packages/test/veyra-selftest/recipe.sh`, `tests/konten/konten-test.sh`,
+  `tests/image/variante-test.sh`, `.github/workflows/toolchain.yml`, `docs/hardware-test.md`.
+- **Schritte:** Variante `dev` (wie bisher, nur CI und VM) und `test` (root gesperrt,
+  `SU_WHEEL_ONLY yes`, Ersteinrichtung an Konsole 1 setzt das root-Passwort und legt
+  optional einen Benutzer in `wheel` an); Variante in `/etc/veyra/variante` und
+  `/etc/issue`; `veyra-kontencheck` prüft Konten und Rechte je Variante im Selbsttest;
+  CI baut und bootet das Testabbild zusätzlich.
+- **Abhängigkeiten/Risiken:** `systemd-firstboot` ist abgeschaltet, daher eigenes Skript.
+  Hashes als SHA-512-crypt (`openssl passwd -6`), kein yescrypt-Werkzeug vorhanden. Kein
+  PAM, kein sudo. Die Live-ISO bleibt ohne root-Passwort (Live-System, gekennzeichnet).
+  Die Ersteinrichtung selbst (Eingaben an Konsole 1) läuft im CI nicht, weil QEMU dort
+  ohne Bildschirm startet; ihre Logik prüfen die Konten-Tests.
+- **Akzeptanz:** Testabbild: root gesperrt, kein Konto ohne Passwort, Ersteinrichtung
+  wartet an Konsole 1, Boot-Test mit Selbsttest „Konten und Rechte: ok“ grün;
+  Entwicklungsabbild: Selbsttest ebenfalls grün.
+- **Testnachweis:** lokal (14.11.2026): 17 von 17 Konten-Tests (Passwort zu kurz, ungleich,
+  gleich Name, ungültige und vorhandene Benutzer, Abbruch schreibt nichts, Hash passt,
+  Rechte, leere Passwörter, UID 0, für alle beschreibbare Dateien), 4 von 4 Abbild-Tests
+  mit Probe-System, shellcheck sauber. CI-Lauf steht aus.
 
 ## P1: Stabilität, Tests, VPKG
 
@@ -181,6 +195,20 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   Konsolen-Logs aus Lauf 38697548625 angewandt: Stufe „Selbsttest“, einziger Hinweis ist
   ein echter Befund (`regulatory.db` fehlt, gehört zu P2-3/P2-4). Im CI-Lauf [42512193788](https://github.com/MagieGubi/Veyra-OS/actions/runs/42512193788):
   „Alle 9 Diagnose-Tests bestanden.“; Abbild und Live-ISO booten weiter mit Selbsttest OK.
+
+### P1-8 PAM und sudo bewerten ⬜
+- **Ziel/Begründung:** shadow und systemd sind ohne PAM gebaut; ein grafischer
+  Login-Manager und sudo brauchen PAM. Heute wird man mit `su` root (nur Gruppe wheel).
+- **Dateien:** neue Rezepte `packages/core/linux-pam`, `packages/core/sudo`, Änderungen an
+  `packages/core/shadow` und `packages/core/systemd` (`-D pam=enabled`).
+- **Schritte:** Linux-PAM aus gepinnter Quelle bauen, shadow und systemd neu mit PAM,
+  Standardregeln mit `pam_unix` und Sperre nach Fehlversuchen (`pam_faillock`), sudo mit
+  `%wheel`.
+- **Abhängigkeiten/Risiken:** erzwingt einen Neubau von Stufe 4b (mehrere Stunden);
+  falsche PAM-Regeln sperren alle aus, daher Boot-Test mit Anmeldung nötig.
+- **Akzeptanz:** Anmeldung an der Konsole über PAM, `sudo` für wheel, falsches Passwort
+  dreimal sperrt; Selbsttest prüft die PAM-Konfiguration.
+- **Testnachweis:** noch keiner.
 
 ## P2: Hardware und Netzwerk
 

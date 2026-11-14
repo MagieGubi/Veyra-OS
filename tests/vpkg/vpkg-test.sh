@@ -360,6 +360,6 @@ for r in "$here"/packages/base/* "$here"/packages/test/*; do
 done
 python3 "$here/packages/base/vpkg/vpkg" index "$t/eigene" >"$t/out" 2>&1 \
   || fail "eigene Pakete abgelehnt: $(cat "$t/out")"
-ok "eigene Pakete (vpkg, veyra-keyring, veyra-release, Selbsttest) bestehen die Manifestpruefung"
+ok "eigene Pakete (alle unter packages/base und packages/test) bestehen die Manifestpruefung"
 
 echo "Alle $n VPKG-Tests bestanden."

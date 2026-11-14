@@ -9,6 +9,13 @@
 # Kein Bootloader, keine Initramfs: die Firmware startet den Kernel direkt, der Kernel
 # findet sein Root ueber root=PARTLABEL=veyra-root (eingebaute Kommandozeile).
 #
+# Variante (Umgebungsvariable VARIANTE):
+#   dev   Entwicklungsabbild fuer CI und VM: root ohne Passwort an der Konsole (Standard)
+#   test  Testabbild fuer echte Rechner: root gesperrt, bis die Ersteinrichtung an
+#         Konsole 1 ein Passwort setzt (Paket veyra-konten muss in PAKET-VERZ liegen);
+#         su nur fuer Mitglieder der Gruppe wheel
+# Die Variante steht im Abbild in /etc/veyra/variante und in /etc/issue.
+#
 # Aufruf (als root, braucht mkfs.ext4, mkfs.fat, mtools, sfdisk, zstd, python3 >= 3.11):
 #   image/build-image.sh SYSTEM.tar.zst KERNEL-VERZ PAKET-VERZ AUSGABE.img [BASIS-VERZ]
 #   KERNEL-VERZ enthaelt vmlinuz-* und modules-*.tar.zst (Phase 4),
@@ -22,6 +29,8 @@ set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "build-image.sh braucht root" >&2; exit 1; }
 [ $# -eq 4 ] || [ $# -eq 5 ] || { sed -n '2,20p' "$0"; exit 1; }
 system=$1 kdir=$2 pkgdir=$3 img=$4 basedir=${5:-}
+variante=${VARIANTE:-dev}
+case $variante in dev|test) ;; *) echo "VARIANTE muss dev oder test sein, nicht '$variante'" >&2; exit 1 ;; esac
 vpkg=$(cd "$(dirname "$0")/.." && pwd)/packages/base/vpkg/vpkg
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1767225600}
 
@@ -80,13 +89,37 @@ install -d "$root/mnt/daten"
 echo 'LANG=C.UTF-8' > "$root/etc/locale.conf"
 # Leere machine-id: jedes gestartete System erzeugt beim ersten Start seine eigene.
 : > "$root/etc/machine-id"
-# Entwicklungsabbild: root ohne Passwort an der Konsole. Nicht fuer echte Rechner gedacht.
-sed -i 's/^root:[^:]*:/root::/' "$root/etc/shadow"
-cat > "$root/etc/issue" <<'ISSUE'
-Veyra OS Core 0.1 (Entwicklungsabbild) \l
+install -d "$root/etc/veyra"
+echo "$variante" > "$root/etc/veyra/variante"
+if [ "$variante" = dev ]; then
+  # Entwicklungsabbild: root ohne Passwort an der Konsole. Nicht fuer echte Rechner gedacht.
+  sed -i 's/^root:[^:]*:/root::/' "$root/etc/shadow"
+  cat > "$root/etc/issue" <<'ISSUE'
+Veyra OS Core 0.1 (Entwicklungsabbild, nur fuer VM und CI) \l
 Anmeldung: root, ohne Passwort.
 
 ISSUE
+else
+  [ -x "$root/usr/bin/veyra-einrichtung" ] \
+    || { echo "VARIANTE=test braucht das Paket veyra-konten in $pkgdir" >&2; exit 1; }
+  # Testabbild: root gesperrt (kein gueltiger Hash), bis veyra-einrichtung ein Passwort setzt.
+  sed -i 's/^root:[^:]*:/root:!*:/' "$root/etc/shadow"
+  if awk -F: '$2 == "" {f = 1} END {exit !f}' "$root/etc/shadow"; then
+    echo "Konto ohne Passwort im Testabbild: $(awk -F: '$2 == "" {print $1}' "$root/etc/shadow")" >&2; exit 1
+  fi
+  touch "$root/etc/veyra/einrichtung-noetig"
+  # su nur fuer die Gruppe wheel (shadow ohne PAM liest das aus login.defs).
+  if grep -qE '^#?[[:space:]]*SU_WHEEL_ONLY' "$root/etc/login.defs"; then
+    sed -i -E 's/^#?[[:space:]]*SU_WHEEL_ONLY.*/SU_WHEEL_ONLY yes/' "$root/etc/login.defs"
+  else
+    echo 'SU_WHEEL_ONLY yes' >> "$root/etc/login.defs"
+  fi
+  cat > "$root/etc/issue" <<'ISSUE'
+Veyra OS Core 0.1 (Testabbild) \l
+root ist gesperrt, bis die Ersteinrichtung an Konsole 1 ein Passwort gesetzt hat.
+
+ISSUE
+fi
 
 echo ">> Root-Dateisystem (ext4)"
 used_mib=$(( $(du -sm "$root" | cut -f1) ))
@@ -128,4 +161,4 @@ dd if="$work/esp.img" of="$img" bs=1M seek=1 conv=notrunc status=none
 dd if="$work/root.img" of="$img" bs=1M seek=$((1 + esp_mib)) conv=notrunc status=none
 dd if="$work/data.img" of="$img" bs=1M seek=$((1 + esp_mib + root_mib)) conv=notrunc status=none
 sfdisk -l "$img"
-echo "Abbild fertig: $img (Kernel $kver)"
+echo "Abbild fertig: $img (Kernel $kver, Variante $variante)"

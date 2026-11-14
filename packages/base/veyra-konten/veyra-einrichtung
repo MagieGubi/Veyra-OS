@@ -1,0 +1,98 @@
+#!/bin/bash
+# Veyra-Ersteinrichtung: setzt beim ersten Start des Testabbilds das root-Passwort und legt
+# auf Wunsch einen Benutzer an (Gruppe wheel, darf mit su root werden).
+# Laeuft nur, solange /etc/veyra/einrichtung-noetig existiert; bis dahin ist root gesperrt.
+#
+# Aufruf: veyra-einrichtung [--root VERZ]
+#   --root VERZ  Zielsystem in VERZ statt / (fuer Tests und spaeter den Installer)
+# Eingaben kommen von der Konsole (Passwoerter ohne Echo) oder zeilenweise von stdin.
+# Passwoerter stehen nie auf der Kommandozeile: openssl liest sie von stdin, an usermod und
+# useradd geht nur der Hash (SHA-512-crypt).
+set -euo pipefail
+ziel=/
+while [ $# -gt 0 ]; do
+  case $1 in
+    --root) ziel=$2; shift 2 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    *) echo "veyra-einrichtung: unbekannte Option $1" >&2; exit 2 ;;
+  esac
+done
+ziel=${ziel%/}
+etc=$ziel/etc
+noetig=$etc/veyra/einrichtung-noetig
+fertig=$ziel/var/lib/veyra/einrichtung-fertig
+MINDEST=8
+
+if [ ! -e "$noetig" ]; then
+  echo "Veyra ist bereits eingerichtet (keine Datei ${noetig#"$ziel"})."
+  exit 0
+fi
+
+tty=0
+[ -t 0 ] && tty=1
+# frage TEXT -> Antwort in $antwort; Ende der Eingabe bricht ab
+frage() {
+  printf '%s' "$1"
+  if ! IFS= read -r antwort; then echo; echo "Abbruch: Eingabe beendet, nichts geaendert." >&2; exit 1; fi
+}
+geheim() {
+  printf '%s' "$1"
+  if [ $tty = 1 ]; then
+    if ! IFS= read -rs antwort; then echo; echo "Abbruch: Eingabe beendet, nichts geaendert." >&2; exit 1; fi
+    echo
+  else
+    if ! IFS= read -r antwort; then echo; echo "Abbruch: Eingabe beendet, nichts geaendert." >&2; exit 1; fi
+    echo
+  fi
+}
+# neues_passwort FUER -> Hash in $hash
+neues_passwort() {
+  local p1
+  while :; do
+    geheim "Neues Passwort fuer $1: "; p1=$antwort
+    if [ ${#p1} -lt $MINDEST ]; then echo "Zu kurz: mindestens $MINDEST Zeichen."; continue; fi
+    if [ "$p1" = "$1" ]; then echo "Das Passwort darf nicht der Name sein."; continue; fi
+    geheim "Passwort wiederholen: "
+    if [ "$antwort" != "$p1" ]; then echo "Die Passwoerter stimmen nicht ueberein."; continue; fi
+    hash=$(printf '%s\n' "$p1" | openssl passwd -6 -stdin)
+    unset p1 antwort
+    return 0
+  done
+}
+
+echo "=== Veyra-Ersteinrichtung ==="
+echo "root ist gesperrt, bis hier ein Passwort gesetzt ist."
+neues_passwort root; root_hash=$hash
+
+benutzer=""
+while :; do
+  frage "Benutzername fuer die taegliche Arbeit (leer = keinen anlegen): "
+  benutzer=$antwort
+  [ -z "$benutzer" ] && break
+  if ! [[ $benutzer =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    echo "Ungueltig: Kleinbuchstaben, Ziffern, _ und -, hoechstens 32 Zeichen, nicht mit Ziffer beginnen."
+    continue
+  fi
+  if grep -q "^$benutzer:" "$etc/passwd" "$etc/group"; then
+    echo "Den Namen $benutzer gibt es schon."; continue
+  fi
+  neues_passwort "$benutzer"; benutzer_hash=$hash
+  break
+done
+
+# Erst jetzt wird geschrieben: bis hierhin hat ein Abbruch nichts veraendert.
+r=()
+[ "$ziel" != "" ] && r=(-R "$ziel")
+usermod "${r[@]}" -p "$root_hash" root
+if [ -n "$benutzer" ]; then
+  useradd "${r[@]}" -m -U -G wheel -s /bin/bash -p "$benutzer_hash" "$benutzer"
+  echo "Benutzer $benutzer angelegt (Gruppe wheel: darf mit 'su' root werden)."
+fi
+install -d -m 755 "${fertig%/*}"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$fertig"
+rm -f "$noetig"
+echo "Einrichtung abgeschlossen. root-Passwort gesetzt."
+if [ "$ziel" = "" ] && [ -d /run/systemd/system ]; then
+  # Anmeldung an Konsole 1 freigeben (war waehrend der Einrichtung gesperrt).
+  systemctl --no-block restart getty@tty1.service || true
+fi

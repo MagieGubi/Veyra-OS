@@ -1,0 +1,75 @@
+#!/bin/bash
+# Prueft Konten und Rechte eines Veyra-Systems passend zur Variante (/etc/veyra/variante):
+#   alle      passwd/group 644, shadow/gshadow nur fuer root lesbar, nur root hat UID 0,
+#             keine fuer alle beschreibbaren Dateien und Verzeichnisse (ausser mit Sticky-Bit)
+#   dev       hoechstens root ohne Passwort (Entwicklungsabbild)
+#   test      kein Konto ohne Passwort; root gesperrt, solange die Ersteinrichtung aussteht;
+#             su nur fuer die Gruppe wheel
+# Ausgabe: eine Zeile je Pruefung ("ok: ..." oder "FEHLER: ..."), Exitcode 1 bei Fehlern.
+# Aufruf: veyra-kontencheck [--root VERZ]
+set -uo pipefail
+ziel=/
+[ "${1:-}" = --root ] && ziel=$2
+ziel=${ziel%/}
+etc=$ziel/etc
+fehler=0
+ok() { echo "ok: $*"; }
+nein() { echo "FEHLER: $*"; fehler=1; }
+
+variante=$(cat "$etc/veyra/variante" 2>/dev/null || true)
+case $variante in
+  dev|test) ok "Variante $variante" ;;
+  *) nein "Variante unbekannt ('$variante' in /etc/veyra/variante)" ;;
+esac
+
+# rechte DATEI ERLAUBT...: Besitzer root:root und Modus aus der Liste
+rechte() {
+  local f=$1 ist; shift
+  [ -e "$etc/$f" ] || { nein "/etc/$f fehlt"; return; }
+  ist=$(stat -c '%a %u %g' "$etc/$f")
+  for m in "$@"; do
+    [ "$ist" = "$m 0 0" ] && return 0
+  done
+  nein "/etc/$f hat Modus/Besitzer $ist, erwartet einer von: $*"
+}
+vorher=$fehler
+rechte passwd 644
+rechte group 644
+rechte shadow 0 400 600 640
+[ -e "$etc/gshadow" ] && rechte gshadow 0 400 600 640
+[ $fehler = "$vorher" ] && ok "Rechte von passwd, group, shadow"
+
+uid0=$(awk -F: '$3 == 0 && $1 != "root" {print $1}' "$etc/passwd")
+if [ -z "$uid0" ]; then ok "nur root hat UID 0"; else nein "weitere Konten mit UID 0: $uid0"; fi
+
+leer=$(awk -F: '$2 == "" {print $1}' "$etc/shadow" | tr '\n' ' ')
+leer=${leer% }
+rootpw=$(awk -F: '$1 == "root" {print $2}' "$etc/shadow")
+if [ "$variante" = test ]; then
+  if [ -z "$leer" ]; then ok "kein Konto ohne Passwort"; else nein "Konten ohne Passwort: $leer"; fi
+  if [ -e "$etc/veyra/einrichtung-noetig" ]; then
+    case $rootpw in
+      '!'*|'*'*) ok "root gesperrt, Ersteinrichtung steht aus" ;;
+      *) nein "Ersteinrichtung steht aus, aber root ist nicht gesperrt" ;;
+    esac
+  elif [ -e "$ziel/var/lib/veyra/einrichtung-fertig" ]; then
+    ok "Ersteinrichtung abgeschlossen"
+  else
+    nein "weder Ersteinrichtung ausstehend noch abgeschlossen"
+  fi
+  if grep -qE '^SU_WHEEL_ONLY[[:space:]]+yes' "$etc/login.defs" 2>/dev/null; then
+    ok "su nur fuer die Gruppe wheel"
+  else
+    nein "su ist nicht auf die Gruppe wheel beschraenkt (SU_WHEEL_ONLY)"
+  fi
+else
+  andere=$(tr ' ' '\n' <<<"$leer" | grep -vx root | tr '\n' ' ' || true)
+  if [ -z "${andere// /}" ]; then ok "ausser root kein Konto ohne Passwort"; else nein "Konten ohne Passwort: $andere"; fi
+fi
+
+# Fuer alle beschreibbar: Dateien nie, Verzeichnisse nur mit Sticky-Bit (wie /tmp).
+offen=$(find "$ziel/" -xdev \( -path "$ziel/proc" -o -path "$ziel/sys" \) -prune -o \
+  \( -type f -perm -0002 -print \) -o \( -type d -perm -0002 ! -perm -1000 -print \) 2>/dev/null \
+  | head -n 10 | sed "s|^$ziel||" | tr '\n' ' ')
+if [ -z "$offen" ]; then ok "keine fuer alle beschreibbaren Dateien"; else nein "fuer alle beschreibbar: $offen"; fi
+exit $fehler
