@@ -68,3 +68,15 @@ läuft im CI nicht, weil QEMU dort ohne Bildschirm startet. Nichts auf echter Ha
 
 P1-3: Versionsbedingungen in VPKG (`name>=ver`, `name=ver`, `name<ver`) mit Tests,
 danach P3-2: CLI-Installer auf eine virtuelle Platte.
+
+## Nachtrag: CI-Nachweis (14.11.2026)
+
+Nach Adrians Freigabe gepusht (Commit c21af8b). CI-Lauf [43653042098](https://github.com/MagieGubi/Veyra-OS/actions/runs/43653042098): alle 12 Jobs grün.
+Konten-Tests 17/17, Abbild-Tests 4/4; das Testabbild bootet (Login nach 6,3 s), der
+Selbsttest meldet „Konten und Rechte: ok (Variante test, 7 Pruefungen)“ und
+„Ersteinrichtung: wartet an Konsole 1 auf das root-Passwort“, das System fährt sauber
+herunter. Entwicklungsabbild und Live-ISO: „Konten und Rechte: ok (Variante dev,
+5 Pruefungen)“. P0-3 ist damit erledigt.
+
+Begonnen ist die nächste Aufgabe P1-3 (VPKG 0.4 mit Versionsbedingungen): lokal
+27 von 27 Tests als root, 28 von 28 ohne root; noch nicht gepusht.

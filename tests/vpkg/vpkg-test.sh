@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests fuer VPKG 0.3 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
+# Tests fuer VPKG 0.4 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
 # Braucht python3 (3.11+), zstd, openssl. Laeuft ohne root-Rechte.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -351,6 +351,47 @@ vs list | grep -qx 'app 2.0-1' || fail "Version nach abgelehntem Downgrade verae
 vs install --allow-downgrade "$P/app-1.0-1-x86_64.vpkg" >/dev/null || fail "--allow-downgrade"
 vs list | grep -qx 'app 1.0-1' || fail "Downgrade mit --allow-downgrade nicht ausgefuehrt"
 ok "aeltere Version wird nur mit --allow-downgrade installiert"
+
+# Versionsbedingungen (VPKG 0.4): eigenes Zielsystem ohne Schluessel.
+vr=$t/vr
+mkdir -p "$vr/var/lib/vpkg/installed"
+vv() { python3 "$here/packages/base/vpkg/vpkg" --root "$vr" "$@"; }
+mkpkg lib 1.0 "" "" usr/lib/lib.txt=l1
+mkpkg lib 2.0 "" "" usr/lib/lib.txt=l2
+mkpkg tool 1.0 "'lib>=2.0'" "" usr/bin/tool=t1
+mkpkg altlast 1.0 "'lib<2'" "" usr/bin/altlast=a
+mkpkg genau 1.0 "'lib=2.0-1'" "" usr/bin/genau=g
+mkpkg streng 1.0 "'lib>=2.0-2'" "" usr/bin/streng=s
+vv install "$P/lib-1.0-1-x86_64.vpkg" >/dev/null
+abgelehnt 'nicht erfuellbar: lib>=2.0 (fuer tool, vorhanden: lib 1.0-1)' vv install "$P/tool-1.0-1-x86_64.vpkg"
+[ ! -e "$vr/usr/bin/tool" ] || fail "tool trotz zu alter Abhaengigkeit ausgepackt"
+mkdir -p "$t/vrepo" && cp "$P/lib-2.0-1-x86_64.vpkg" "$P/tool-1.0-1-x86_64.vpkg" "$t/vrepo/"
+python3 "$here/packages/base/vpkg/vpkg" index "$t/vrepo" >/dev/null
+vv install --repo "$t/vrepo" tool > "$t/out" 2>&1 || fail "tool aus dem Repository: $(cat "$t/out")"
+vv list | grep -qx 'lib 2.0-1' || fail "lib nicht auf 2.0 aktualisiert: $(vv list)"
+[ "$(cat "$vr/usr/lib/lib.txt")" = l2 ] || fail "Datei von lib 2.0 fehlt"
+ok "Versionsbedingung: zu alte Abhaengigkeit abgelehnt, aus dem Repository automatisch aktualisiert"
+
+abgelehnt 'wuerde Abhaengigkeiten brechen' vv install --allow-downgrade "$P/lib-1.0-1-x86_64.vpkg"
+vv list | grep -qx 'lib 2.0-1' || fail "lib trotz Ablehnung zurueckgestuft"
+abgelehnt 'nicht erfuellbar: lib<2' vv install "$P/altlast-1.0-1-x86_64.vpkg"
+abgelehnt 'nicht erfuellbar: lib>=2.0-2' vv install "$P/streng-1.0-1-x86_64.vpkg"
+vv install "$P/genau-1.0-1-x86_64.vpkg" >/dev/null || fail "lib=2.0-1 nicht erfuellt"
+abgelehnt 'braucht lib' vv remove lib
+vv check >/dev/null || fail "check mit erfuellten Bedingungen"
+ok "Versionsbedingung: Downgrade bricht nichts, <, = und Release werden geprueft, remove achtet darauf"
+
+vv remove genau tool >/dev/null
+vv install --allow-downgrade "$P/lib-1.0-1-x86_64.vpkg" >/dev/null || fail "Downgrade ohne Abhaengige"
+vv install --no-deps "$P/tool-1.0-1-x86_64.vpkg" >/dev/null
+if vv check > "$t/out" 2>&1; then fail "check meldet unerfuellte Bedingung nicht"; fi
+grep -q 'tool: Abhaengigkeit lib>=2.0 nicht erfuellt (installiert: lib 1.0-1)' "$t/out" || fail "check-Meldung: $(cat "$t/out")"
+d=$t/r/kaputt && mkdir -p "$d"
+printf 'pkgname=kaputt pkgver=1 license=MIT\ndepends=(%q)\npackage() { :; }\n' 'lib>>2' > "$d/recipe.sh"
+mkdir -p "$t/kaputt" && "$build" --srcdir "$t" --outdir "$t/kaputt" "$d" >/dev/null
+abgelehnt "ungueltige Liste 'depends'" python3 "$here/packages/base/vpkg/vpkg" index "$t/kaputt"
+abgelehnt "ungueltige Liste 'depends'" vv install "$t/kaputt/kaputt-1-1-x86_64.vpkg"
+ok "Versionsbedingung: check meldet Verletzung, falsche Syntax wird abgelehnt (index, install)"
 
 # Die eigenen Pakete (wie im CI-Job "image" gebaut) muessen die Manifestpruefung bestehen;
 # vpkg selbst bringt z. B. die leeren Verzeichnisse der Paketdatenbank mit.

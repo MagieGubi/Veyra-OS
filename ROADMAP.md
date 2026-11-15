@@ -17,7 +17,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 | Toolchain, Basissystem (68 Pakete, glibc bis systemd) | aus Quellcode gebaut, Quellen gepinnt und geprüft | CI, `build/scripts/check-pinned.sh` |
 | Kernel 6.18.56-veyra2 | zwei unabhängige Builds bit-identisch | CI-Job `kernel-reproducible` |
 | Boot | UEFI, Kernel direkt als `BOOTX64.EFI`, ohne Bootloader und Initramfs; Live-ISO mit eigenem Init (`kernel/live/init.c`) | QEMU im CI (Festplatte und CD) |
-| VPKG | Installieren, Entfernen, Abhängigkeiten, Ed25519-Signaturen, Transaktionen mit Rücknahme, signierter Repository-Index mit Stand- und Downgrade-Schutz (VPKG 0.3) | 25 Tests in `tests/vpkg/vpkg-test.sh` (einer nur ohne root) und 6 in `run.sh`, Selbsttest im gebooteten System |
+| VPKG | Installieren, Entfernen, Abhängigkeiten, Ed25519-Signaturen, Transaktionen mit Rücknahme, signierter Repository-Index mit Stand- und Downgrade-Schutz, Versionsbedingungen (VPKG 0.4) | 28 Tests in `tests/vpkg/vpkg-test.sh` (einer nur ohne root) und 6 in `run.sh`, Selbsttest im gebooteten System |
 | Netzwerk | Kabel per DHCP, Namensauflösung, außer Loopback keine offenen Ports | Selbsttest in QEMU |
 | Echte Hardware | Treiber und USB-Test vorbereitet, **nie auf echter Hardware gestartet** | – |
 | Installation auf Festplatte, Updates, Desktop | fehlen | – |
@@ -68,7 +68,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   Abbild und in der Live-ISO (nur QEMU, nicht auf echter Hardware). Der Filter erkannte
   lokal mit einer Beispielausgabe von `ss` den LLMNR-Port 5355.
 
-### P0-3 Sichere Root-Konfiguration, Entwicklungs- und Testabbild getrennt 🟡
+### P0-3 Sichere Root-Konfiguration, Entwicklungs- und Testabbild getrennt ✅
 - **Ziel/Begründung:** Jedes Abbild, auch der USB-Stick für den Hardware-Test, erlaubte die
   Anmeldung als root ohne Passwort. In der VM gewollt, auf einem echten Rechner ein Risiko.
 - **Dateien:** `image/build-image.sh` (`VARIANTE=dev|test`), neues Paket
@@ -91,7 +91,12 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Testnachweis:** lokal (14.11.2026): 17 von 17 Konten-Tests (Passwort zu kurz, ungleich,
   gleich Name, ungültige und vorhandene Benutzer, Abbruch schreibt nichts, Hash passt,
   Rechte, leere Passwörter, UID 0, für alle beschreibbare Dateien), 4 von 4 Abbild-Tests
-  mit Probe-System, shellcheck sauber. CI-Lauf steht aus.
+  mit Probe-System, shellcheck sauber. CI-Lauf [43653042098](https://github.com/MagieGubi/Veyra-OS/actions/runs/43653042098): alle Jobs grün, „Alle 17
+  Konten-Tests bestanden.“, „Alle 4 Abbild-Tests bestanden.“; Testabbild: „Konten und
+  Rechte: ok (Variante test, 7 Pruefungen)“, „Ersteinrichtung: wartet an Konsole 1 auf das
+  root-Passwort“, Login nach 6,3 s, sauber heruntergefahren; Entwicklungsabbild und
+  Live-ISO: „Konten und Rechte: ok (Variante dev, 5 Pruefungen)“. Die Eingabe an Konsole 1
+  selbst ist nur durch die Konten-Tests geprüft, nicht im gebooteten System.
 
 ## P1: Stabilität, Tests, VPKG
 
@@ -122,19 +127,24 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Akzeptanz:** manipulierte Manifeste werden abgelehnt, alle eigenen Pakete bestehen.
 - **Testnachweis:** Tests 20 und 25, CI-Läufe 38451902869 und [38697548625](https://github.com/MagieGubi/Veyra-OS/actions/runs/38697548625).
 
-### P1-3 Versionsbedingungen in Abhängigkeiten ⬜
+### P1-3 Versionsbedingungen in Abhängigkeiten 🟡
 - **Ziel/Begründung:** `depends` kennt nur Namen. Ein Paket, das `liba>=2` braucht, lässt
   sich heute gegen `liba 1` installieren; inkompatible Abhängigkeiten bleiben unbemerkt.
-- **Dateien:** `build/scripts/vpkg-build` (Rezeptsyntax), `packages/base/vpkg/vpkg`
-  (resolve, remove, check), `docs/vpkg-format.md`.
+- **Dateien:** `packages/base/vpkg/vpkg` (DEP_RE, parse_dep, satisfied, resolve, remove,
+  check, Manifest- und Indexprüfung), `tests/vpkg/vpkg-test.sh`, `docs/vpkg.md`,
+  `docs/vpkg-format.md`.
 - **Schritte:** Syntax `name>=ver`, `name=ver`, `name<ver` in `depends`; Vergleich mit
   dem vorhandenen `vercmp`; Prüfung beim Installieren, Entfernen und in `check`.
 - **Abhängigkeiten/Risiken:** Formaländerung: ältere VPKG-Versionen lehnen neue Einträge
   ab (`NAME_RE`). Migration: erst VPKG aktualisieren, dann Pakete mit Bedingungen.
 - **Akzeptanz:** Installation gegen eine zu alte Abhängigkeit und ein Update, das eine
   Bedingung verletzt, werden mit klarer Meldung abgelehnt.
-- **Testnachweis:** noch keiner; geplant sind Tests für erfüllte, nicht erfüllte und
-  durch Update verletzte Bedingungen.
+- **Testnachweis:** lokal (14.11.2026): VPKG 0.4, Tests 24 bis 26 in
+  `tests/vpkg/vpkg-test.sh` (zu alte Abhängigkeit abgelehnt und aus dem Repository
+  aktualisiert, Downgrade bricht nichts, `<`, `=` und Release geprüft, `remove` und
+  `check` beachten Bedingungen, falsche Syntax abgelehnt); 27 von 27 als root, 28 von 28
+  ohne root. CI-Lauf steht aus. Die Syntaxprüfung sitzt in VPKG statt in `vpkg-build`,
+  weil eine Änderung an `vpkg-build` den mehrstündigen Neubau von Stufe 4b auslöst.
 
 ### P1-4 Reproduzierbarkeit der Basispakete und des Abbilds prüfen ⬜
 - **Ziel/Begründung:** Nur der Kernel wird nachweislich bit-identisch gebaut. Für Pakete

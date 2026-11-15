@@ -21,7 +21,7 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Veyra-Kernel 6.18.56-veyra2 (Phase 4, ab veyra2 mit Laptop-Treibern) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch |
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
 | Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
-| Paketverwaltung VPKG 0.3 (installieren, entfernen, Abhängigkeiten, Transaktionen mit Rücknahme, signierter Repository-Index, Downgrade-Schutz) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 25 Tests grün, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
+| Paketverwaltung VPKG 0.4 (installieren, entfernen, Abhängigkeiten mit Versionsbedingungen, Transaktionen mit Rücknahme, signierter Repository-Index, Downgrade-Schutz) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 25 Tests grün, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
 | Paketsignaturen (Ed25519), Paket-Repository als CI-Artefakt | `packages/base/veyra-keyring/`, [docs/signaturen.md](docs/signaturen.md) | eingebaut, Schlüssel `veyra-2026` aktiv |
 | Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 6,4 s ab QEMU-Start mit KVM, [Messwerte](docs/messwerte.md)) |
 | Entwicklungs- und Testabbild getrennt: im Testabbild root gesperrt bis zur Ersteinrichtung (root-Passwort, erster Benutzer), Prüfung von Konten und Rechten | `packages/base/veyra-konten/`, `image/build-image.sh` (`VARIANTE=test`) | lokal getestet, Boot im CI steht aus |
@@ -54,7 +54,7 @@ bash tests/vpkg/vpkg-test.sh
 - [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md): Phasenplan bis Release 1.0
 - [docs/architecture.md](docs/architecture.md): Architektur und Entscheidungen
 - [docs/vpkg-format.md](docs/vpkg-format.md): Paket- und Rezeptformat
-- [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.3
+- [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.4
 - [docs/phase6.md](docs/phase6.md): Phase 6, Bestandsaufnahme und VPKG-Transaktionen
 - [docs/signaturen.md](docs/signaturen.md): Paketsignaturen
 - [docs/virtualbox.md](docs/virtualbox.md): Veyra in VirtualBox starten (fertige VDI-Festplatte)

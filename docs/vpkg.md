@@ -1,4 +1,4 @@
-# VPKG 0.3: Bedienung
+# VPKG 0.4: Bedienung
 
 `vpkg` ist die Paketverwaltung von Veyra OS (`packages/base/vpkg/vpkg`, Python 3.11+,
 nur Standardbibliothek, dazu `zstd`, `tar` und `openssl`). Sie installiert, aktualisiert
@@ -21,6 +21,20 @@ weiß zu jeder Datei, zu welchem Paket sie gehört.
 
 Alle Befehle verstehen `--root DIR`, um ein anderes System zu bearbeiten (so baut
 `image/build-image.sh` das Abbild).
+
+## Versionsbedingungen (ab 0.4)
+
+Abhängigkeiten dürfen eine Bedingung tragen: `glibc>=2.42`, `vpkg=0.4-1`, `lib<2`
+(Operatoren `>=`, `<=`, `=`, `<`, `>`). Ohne `-` in der Version zählt nur die Version,
+mit `-` auch das Release (`lib>=2.0-2` verlangt mindestens Release 2). Bedingungen gelten
+nur für den echten Paketnamen, nicht für `provides`.
+
+- `install` lehnt ein Paket ab, dessen Bedingung nicht erfüllbar ist, und nennt, was
+  vorhanden ist. Hat das Repository eine passende neuere Version, wird die Abhängigkeit
+  im selben Vorgang mit aktualisiert.
+- Eine Installation (auch ein Downgrade), die die Bedingung eines schon installierten
+  Pakets brechen würde, wird abgelehnt.
+- `remove` und `check` beachten Bedingungen ebenfalls.
 
 ## Sicherheit
 
@@ -102,7 +116,7 @@ installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgäng
 `/var/lib/vpkg/txn/` gibt es nur während eines Vorgangs (siehe Transaktionen),
 `/var/lib/vpkg/repo-stand.json` hält den zuletzt angenommenen Index-Stand je Quelle.
 
-## Grenzen von 0.3
+## Grenzen von 0.4
 
 - Install-Skripte lassen sich nicht zurücknehmen (siehe oben).
 - Die Transaktion schützt vor Abbrüchen, nicht vor Fremdeingriffen: wer während eines
@@ -111,5 +125,6 @@ installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgäng
   nicht ältere als die schon gesehenen ausliefern). Ein Ablaufdatum braucht eine
   verlässliche Uhrzeit im System und folgt später.
 - Ohne Schlüssel in `/etc/vpkg/keys` wird weder Index noch Paket auf Signaturen geprüft.
-- Keine Versionsbedingungen in Abhängigkeiten (nur Namen), kein `pre_remove`.
+- Kein `pre_remove`; keine Paketgruppen oder Metapakete; Abruf nur aus einem lokalen
+  Verzeichnis oder einer Adresse ohne Mirror-Liste und Cache.
 - Kernel und Kernelmodule sind noch kein Paket.

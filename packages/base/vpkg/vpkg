@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# vpkg 0.3: Paketverwaltung von Veyra OS.
+# vpkg 0.4: Paketverwaltung von Veyra OS (ab 0.4 mit Versionsbedingungen in depends).
 #
 # Installiert, aktualisiert und entfernt .vpkg-Pakete (Format: docs/vpkg-format.md),
 # loest Abhaengigkeiten auf und fuehrt Buch darueber, welche Datei zu welchem Paket gehoert.
@@ -44,7 +44,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 
-VERSION = "0.3"
+VERSION = "0.4"
 DB = "var/lib/vpkg"
 TXN = DB + "/txn"
 REPO_STAND = DB + "/repo-stand.json"
@@ -54,6 +54,9 @@ SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 KEYS = "etc/vpkg/keys"
 REPO_FILE = "etc/vpkg/repo"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9+._-]*$")
+# Abhaengigkeit: Name, optional mit Versionsbedingung (glibc>=2.42, vpkg=0.4-1, foo<2).
+# Ohne "-" in der Version zaehlt nur die Version, mit "-" Version und Release.
+DEP_RE = re.compile(r"^([a-z0-9][a-z0-9+._-]*?)(?:(>=|<=|=|<|>)([0-9A-Za-z][0-9A-Za-z.+~_-]*))?$")
 
 
 class Fehler(Exception):
@@ -115,6 +118,39 @@ def fullver(m):
     return f"{m['version']}-{m.get('release', 1)}"
 
 
+def parse_dep(d):
+    """'glibc>=2.42' -> ('glibc', '>=', '2.42'); 'bash' -> ('bash', None, None)."""
+    m = DEP_RE.match(d)
+    if not m:
+        raise Fehler(f"ungueltige Abhaengigkeit {d!r}")
+    return m.group(1), m.group(2), m.group(3)
+
+
+def dep_name(d):
+    return parse_dep(d)[0]
+
+
+def ver_ok(m, op, ver):
+    """Erfuellt das Paket (Manifest m) die Bedingung 'op ver'?"""
+    cur = fullver(m) if "-" in ver else str(m["version"])
+    c = vercmp(cur, ver)
+    return {">=": c >= 0, "<=": c <= 0, "=": c == 0, "<": c < 0, ">": c > 0}[op]
+
+
+def satisfied(d, pkgs, pmap=None):
+    """Paketname, der Abhaengigkeit d unter pkgs (Name -> Manifest) erfuellt, sonst None.
+    Ohne Versionsbedingung zaehlt auch provides, mit Bedingung nur das Paket selbst."""
+    n, op, ver = parse_dep(d)
+    if op is None:
+        return (pmap if pmap is not None else provides_map(pkgs)).get(n)
+    m = pkgs.get(n)
+    return n if m is not None and ver_ok(m, op, ver) else None
+
+
+def valid_deps(v):
+    return isinstance(v, list) and all(isinstance(x, str) and DEP_RE.match(x) for x in v)
+
+
 # ---------------------------------------------------------------- Pakete
 
 class Paket:
@@ -167,7 +203,9 @@ class Paket:
         for k in ("version", "release"):
             if not isinstance(m.get(k), (str, int)) or str(m[k]) == "":
                 raise Fehler(f"{self.path}: Manifest ohne gueltige Angabe '{k}'")
-        for k in ("depends", "provides", "conflicts"):
+        if not valid_deps(m.get("depends", [])):
+            raise Fehler(f"{self.path}: Manifest: ungueltige Liste 'depends'")
+        for k in ("provides", "conflicts"):
             v = m.get(k, [])
             if not isinstance(v, list) or not all(isinstance(x, str) and NAME_RE.match(x) for x in v):
                 raise Fehler(f"{self.path}: Manifest: ungueltige Liste '{k}'")
@@ -597,7 +635,9 @@ class Repo:
             for k in ("version", "release"):
                 if not isinstance(e.get(k), (str, int)) or str(e[k]) == "":
                     raise Fehler(f"{self.src}: Index: {n}: Angabe '{k}' fehlt")
-            for k in ("depends", "provides", "conflicts"):
+            if not valid_deps(e.get("depends", [])):
+                raise Fehler(f"{self.src}: Index: {n}: ungueltige Liste 'depends'")
+            for k in ("provides", "conflicts"):
                 v = e.get(k, [])
                 if not isinstance(v, list) or not all(isinstance(x, str) and NAME_RE.match(x) for x in v):
                     raise Fehler(f"{self.src}: Index: {n}: ungueltige Liste '{k}'")
@@ -753,21 +793,45 @@ def resolve(system, wanted, repo, tmp, no_deps):
                 raise Fehler(f"{w}: nicht im Repository")
             load(repo.get(w), w)
 
-    # Fehlende Abhaengigkeiten aus dem Repository nachladen.
+    # Fehlende oder zu alte Abhaengigkeiten aus dem Repository nachladen.
     while True:
-        have = provides_map({**system.installed, **{n: p.m for n, p in chosen.items()}})
-        missing = sorted({d for p in chosen.values() for d in p.m.get("depends", []) if d not in have})
+        pool = {**system.installed, **{n: p.m for n, p in chosen.items()}}
+        pmap = provides_map(pool)
+        missing = sorted({d for p in chosen.values() for d in p.m.get("depends", [])
+                          if not satisfied(d, pool, pmap)})
         if not missing or no_deps:
             break
-        repo_have = provides_map(repo.pkgs) if repo else {}
-        unresolved = [d for d in missing if d not in repo_have]
-        if unresolved:
-            raise Fehler("fehlende Abhaengigkeiten: " + ", ".join(unresolved))
+        repo_pkgs = repo.pkgs if repo else {}
+        repo_have = provides_map(repo_pkgs)
+        load_now, unresolved = set(), []
         for d in missing:
-            n = repo_have[d]
-            if n not in chosen:
-                info(f"   + {n} (Abhaengigkeit)")
-                load(repo.get(n), n)
+            n, op, ver = parse_dep(d)
+            if op is None:
+                cand = repo_have.get(n)
+            else:
+                cand = n if n in repo_pkgs and ver_ok(repo_pkgs[n], op, ver) else None
+            if cand is None or cand in chosen:
+                wer = sorted(p.name for p in chosen.values() if d in p.m.get("depends", []))
+                hat = f", vorhanden: {n} {fullver(pool[n])}" if n in pool else ""
+                unresolved.append(f"{d} (fuer {', '.join(wer)}{hat})")
+            else:
+                load_now.add(cand)
+        if unresolved:
+            raise Fehler("Abhaengigkeiten nicht erfuellbar: " + "; ".join(unresolved))
+        for n in sorted(load_now):
+            info(f"   + {n} {fullver(repo_pkgs[n])} (Abhaengigkeit)")
+            load(repo.get(n), n)
+
+    # Bedingungen schon installierter Pakete duerfen durch diese Installation nicht
+    # brechen (z. B. Downgrade einer Bibliothek, die ein anderes Paket in neuer Version braucht).
+    if not no_deps:
+        pool = {**system.installed, **{n: p.m for n, p in chosen.items()}}
+        pmap = provides_map(pool)
+        broken = [f"{n} braucht {d}" for n, m in sorted(pool.items()) if n not in chosen
+                  for d in m.get("depends", [])
+                  if dep_name(d) in chosen and not satisfied(d, pool, pmap)]
+        if broken:
+            raise Fehler("die Installation wuerde Abhaengigkeiten brechen:\n  " + "\n  ".join(broken))
 
     # Konflikte
     after = {**system.installed, **{n: p.m for n, p in chosen.items()}}
@@ -788,8 +852,8 @@ def resolve(system, wanted, repo, tmp, no_deps):
             return  # Kreis: Reihenfolge innerhalb des Kreises ist egal
         state[n] = 1
         for d in chosen[n].m.get("depends", []):
-            if d in have:
-                visit(have[d])
+            if dep_name(d) in have:
+                visit(have[dep_name(d)])
         state[n] = 2
         order.append(chosen[n])
 
@@ -1007,7 +1071,7 @@ def cmd_remove(args, system):
         needed = []
         for n, m in rest.items():
             for d in m.get("depends", []):
-                if d not in have:
+                if not satisfied(d, rest, have):
                     needed.append(f"{n} braucht {d}")
         if needed:
             raise Fehler("wird noch gebraucht:\n  " + "\n  ".join(sorted(needed))
@@ -1041,7 +1105,7 @@ def need(system, name):
 def cmd_info(args, system):
     m = need(system, args.name)
     rdeps = sorted(n for n, o in system.installed.items()
-                   if any(provides_map({args.name: m}).get(d) for d in o.get("depends", [])))
+                   if any(provides_map({args.name: m}).get(dep_name(d)) for d in o.get("depends", [])))
     rows = [("Name", m["name"]), ("Version", fullver(m)), ("Beschreibung", m.get("description", "")),
             ("Lizenz", m.get("license", "")), ("Adresse", m.get("url", "")),
             ("Haengt ab von", ", ".join(m.get("depends", [])) or "-"),
@@ -1108,8 +1172,13 @@ def cmd_check(args, system):
     have = provides_map(system.installed)
     for n in names:
         for d in system.installed[n].get("depends", []):
-            if d not in have:
-                errs.append(f"{n}: Abhaengigkeit fehlt: {d}")
+            if not satisfied(d, system.installed, have):
+                dn = dep_name(d)
+                if dn in system.installed:
+                    errs.append(f"{n}: Abhaengigkeit {d} nicht erfuellt "
+                                f"(installiert: {dn} {fullver(system.installed[dn])})")
+                else:
+                    errs.append(f"{n}: Abhaengigkeit fehlt: {d}")
     own = {}
     for n, m in system.installed.items():
         for e in m.get("file", []):

@@ -31,7 +31,7 @@ arch = "x86_64"
 description = "..."
 license = "MIT"
 url = "..."
-depends = []          # Laufzeitabhängigkeiten (Paketnamen)
+depends = []          # Laufzeitabhängigkeiten: Name, ab VPKG 0.4 optional mit Bedingung (glibc>=2.42)
 makedepends = []      # Build-Abhängigkeiten
 conflicts = []
 provides = []
@@ -142,3 +142,14 @@ Die Pakete in `packages/core/` werden im Zielsystem selbst gebaut, in der Reihen
 gibt, schreibt `vpkg-build --no-compress` das unkomprimierte tar; außerhalb wird es mit
 `zstd -19 -T1` zur `.vpkg`-Datei (bit-gleich mit dem direkten Weg, siehe Test 5).
 Leere `sha256sums` werden mit `--lock` aus den gepinnten Quellen ergänzt.
+
+## Versionsbedingungen (ab VPKG 0.4)
+
+`depends` darf Einträge der Form `name`, `name>=ver`, `name<=ver`, `name=ver`, `name<ver`
+oder `name>ver` enthalten; `ver` mit `-` vergleicht Version und Release. `provides` und
+`conflicts` bleiben reine Namen. Das Paketformat bleibt `format = 1`.
+
+**Migration:** VPKG bis 0.3 lehnt Pakete und Repository-Indizes mit Bedingungen als
+„ungültige Liste 'depends'“ ab. Deshalb zuerst `vpkg` 0.4 installieren, danach Pakete
+mit Bedingungen. Bisher nutzt kein Veyra-Paket Bedingungen; sie kommen erst mit den
+ersten Paketen, die sie brauchen.

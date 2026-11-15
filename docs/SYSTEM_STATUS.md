@@ -12,16 +12,16 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 
 | Subsystem | Status | Nachweis / Stand |
 | --- | --- | --- |
-| Build-System (Stufen 1 bis 5 in GitHub Actions) | ✅ | Lauf 42512193788, alle Jobs grün; Quellen gepinnt (`check-pinned.sh`: 0 offen) |
+| Build-System (Stufen 1 bis 5 in GitHub Actions) | ✅ | Lauf [43653042098](https://github.com/MagieGubi/Veyra-OS/actions/runs/43653042098), alle Jobs grün; Quellen gepinnt (`check-pinned.sh`: 0 offen) |
 | Cross-Toolchain (GCC 15.2.0, glibc 2.42) | ✅ | CI |
 | Kernel 6.18.56-veyra2 | ✅ | zwei unabhängige Builds bit-identisch (Job „Kernel reproduzierbar?“) |
 | Basissystem (68 Pakete, glibc bis systemd 257.8) | ✅ | CI Stufe 4b; reproduzierbar ungeprüft |
-| VPKG 0.3 (Installieren, Entfernen, Abhängigkeiten, Konflikte, Transaktionen, Signaturen, signierter Index) | ✅ | 24 Tests als root (25 ohne root), Selbsttest im gebooteten System |
-| VPKG: Versionsbedingungen, Gruppen, Metapakete, Cache, Mirrors, HTTPS-Download | ⬜ | – |
+| VPKG 0.4 (Installieren, Entfernen, Abhängigkeiten mit Versionsbedingungen, Konflikte, Transaktionen, Signaturen, signierter Index) | 🟡 | 0.3 mit CI-Nachweis; Versionsbedingungen lokal getestet (27 Tests als root, 28 ohne root), CI steht aus |
+| VPKG: Gruppen, Metapakete, Cache, Mirrors, HTTPS mit Mirror-Liste | ⬜ | – |
 | Paket-Repository | 🔧 | wird pro Lauf als CI-Artefakt gebaut und signiert (7 Tage); kein dauerhaftes Online-Repository |
 | Boot (UEFI, Kernel direkt als `BOOTX64.EFI`) | ✅ | Login nach etwa 7 s in QEMU |
 | Live-ISO (eigenes Init, SquashFS, Overlay) | ✅ | Boot von virtueller CD, Selbsttest OK |
-| Entwicklungs- und Testabbild getrennt, root gesperrt bis zur Ersteinrichtung | 🟡 | 17 Konten-Tests und 4 Abbild-Tests lokal grün; Boot des Testabbilds im CI steht aus |
+| Entwicklungs- und Testabbild getrennt, root gesperrt bis zur Ersteinrichtung | ✅ | Lauf [43653042098](https://github.com/MagieGubi/Veyra-OS/actions/runs/43653042098): 17 Konten- und 4 Abbild-Tests, Testabbild bootet, Selbsttest „Konten und Rechte: ok“; Ersteinrichtung nur per Test geprüft |
 | Benutzerverwaltung | 🔧 | shadow ohne PAM; Ersteinrichtung legt einen Benutzer in `wheel` an; `sudo` fehlt |
 | Netzwerk per Kabel (DHCP, DNS), keine offenen Ports | ✅ | Selbsttest in QEMU (e1000e) |
 | WLAN, Bluetooth, Audio, Firewall, Zeitsynchronisierung, Drucker | ⬜ | – |
