@@ -562,7 +562,7 @@ jobs:
           loop=$(sudo losetup --find --show --read-only --offset "$start" --sizelimit "$size" veyra-core-0.1.img)
           sudo mkdir -p /mnt/quelle
           sudo mount -o ro "$loop" /mnt/quelle
-          truncate -s 4G installiert.img
+          truncate -s 8G installiert.img   # sparse; das Basissystem braucht knapp 6 GiB
           sudo packages/base/veyra-installer/veyra-install installiere "$PWD/installiert.img" \
             --quelle /mnt/quelle --mit-selbsttest --bestaetigt "$PWD/installiert.img" | tee installer.log
           sudo umount /mnt/quelle

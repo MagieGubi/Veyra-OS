@@ -48,7 +48,8 @@ genau dem Ziel entsprechen).
 - Das Ziel trägt das Startmedium (den USB-Stick der Live-ISO).
 - Das Ziel ist schreibgeschützt, nicht lesbar (vorhandene Daten nicht prüfbar) oder hat
   4K-Sektoren.
-- Das Ziel ist zu klein (Quellsystem plus 15 %, 1 GiB frei, 512 MiB EFI).
+- Das Ziel ist zu klein (Quellsystem plus 15 %, 1 GiB frei, 512 MiB EFI; beim heutigen
+  Basissystem mit Compiler und Entwicklungsdateien knapp 6 GiB).
 - Auf einem anderen Datenträger gibt es schon eine Partition `veyra-root` (der Kernel
   könnte sonst das falsche System starten).
 - Das Quellsystem ist unvollständig (kein systemd, VPKG, Ersteinrichtung oder Kernel).

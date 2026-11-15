@@ -318,7 +318,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Testnachweis:** lokal (15.11.2026): `tests/installer/installer-test.sh` 15 von 15
   (FAT32 mit `fsck.fat`, Ablehnungen, keine Änderung ohne Bestätigung, vorhandenes
   System erkannt, Partitionen, Kernel auf der ESP, Konten, Selbsttest entfernt). CI-Lauf
-  mit Installation auf eine leere 4-GiB-Platte und Boot in QEMU steht aus.
+  mit Installation auf eine leere 8-GiB-Platte und Boot in QEMU steht aus.
 
 ### P3-3 Bootloader, UKI, Secure Boot, Btrfs-Snapshots ⬜
 - **Ziel/Begründung:** Mehrere Kernel, Rückfall auf einen alten Stand und Start mit
