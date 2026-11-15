@@ -48,6 +48,9 @@ echo ">> Kernelmodule und Zusatzpakete"
 kernel=$(find "$kdir" -maxdepth 1 -name 'vmlinuz-*' ! -name 'vmlinuz-live-*')
 kver=${kernel##*/vmlinuz-}
 zstd -q -dc "$kdir/modules-$kver.tar.zst" | tar -xpf - -C "$root" --keep-directory-symlink
+# Kernel auch ins System legen: der Installer (veyra-install) schreibt ihn von dort auf die
+# EFI-Systempartition des Ziels (die Live-ISO selbst startet einen eigenen Live-Kernel).
+install -Dm644 "$kernel" "$root/usr/lib/modules/$kver/vmlinuz"
 # Paketschluessel zuerst: danach verlangt VPKG fuer jedes weitere Paket eine gueltige
 # Signatur, auch fuer die Basispakete beim Eintragen.
 mapfile -t keyring < <(find "$pkgdir" -maxdepth 1 -name 'veyra-keyring-*.vpkg')

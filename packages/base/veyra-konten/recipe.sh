@@ -6,13 +6,13 @@
 # Beide Programme liegen neben diesem Rezept; bei jeder Aenderung daran muss sha256sums
 # angepasst werden (tests/konten/konten-test.sh prueft das).
 pkgname=veyra-konten
-pkgver=0.1
+pkgver=0.2
 pkgrel=1
 pkgdesc="Ersteinrichtung: root-Passwort und erster Benutzer"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(veyra-einrichtung veyra-kontencheck)
-sha256sums=(9534d233439587131f4ce5bf943958d4b98f20f921d34f42cb9eb598f3b19b6b 5962eab1309a39516b55e210baafef6c007ab76ce0e3eb854a172d135a1dd64f)
+sha256sums=(9534d233439587131f4ce5bf943958d4b98f20f921d34f42cb9eb598f3b19b6b db3a350f6d0131e545095590eb4bcb226b14fbf47776768fafd5b57aa99ac375)
 depends=(shadow openssl bash systemd)
 
 package() {

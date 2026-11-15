@@ -127,7 +127,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Akzeptanz:** manipulierte Manifeste werden abgelehnt, alle eigenen Pakete bestehen.
 - **Testnachweis:** Tests 20 und 25, CI-Läufe 38451902869 und [38697548625](https://github.com/MagieGubi/Veyra-OS/actions/runs/38697548625).
 
-### P1-3 Versionsbedingungen in Abhängigkeiten 🟡
+### P1-3 Versionsbedingungen in Abhängigkeiten ✅
 - **Ziel/Begründung:** `depends` kennt nur Namen. Ein Paket, das `liba>=2` braucht, lässt
   sich heute gegen `liba 1` installieren; inkompatible Abhängigkeiten bleiben unbemerkt.
 - **Dateien:** `packages/base/vpkg/vpkg` (DEP_RE, parse_dep, satisfied, resolve, remove,
@@ -143,7 +143,9 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   `tests/vpkg/vpkg-test.sh` (zu alte Abhängigkeit abgelehnt und aus dem Repository
   aktualisiert, Downgrade bricht nichts, `<`, `=` und Release geprüft, `remove` und
   `check` beachten Bedingungen, falsche Syntax abgelehnt); 27 von 27 als root, 28 von 28
-  ohne root. CI-Lauf steht aus. Die Syntaxprüfung sitzt in VPKG statt in `vpkg-build`,
+  ohne root. CI: Lauf [43753648158](https://github.com/MagieGubi/Veyra-OS/actions/runs/43753648158)
+  (15.11.2026), alle Jobs grün, VPKG 0.4 im gebooteten Abbild und in der Live-ISO
+  (Selbsttest OK). Die Syntaxprüfung sitzt in VPKG statt in `vpkg-build`,
   weil eine Änderung an `vpkg-build` den mehrstündigen Neubau von Stufe 4b auslöst.
 
 ### P1-4 Reproduzierbarkeit der Basispakete und des Abbilds prüfen ⬜
@@ -295,15 +297,28 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Akzeptanz:** der Selbsttest führt `vpkg upgrade` gegen das Online-Repository aus.
 - **Testnachweis:** noch keiner.
 
-### P3-2 Installation auf eine Festplatte ⬜
+### P3-2 Installation auf eine Festplatte 🟡
 - **Ziel/Begründung:** Veyra läuft bisher nur als fertiges Abbild oder Live-System.
-- **Dateien:** neues Skript `image/install.sh`, `docs/installation.md`.
-- **Schritte:** Ziel nur nach ausdrücklicher Auswahl, Partitionieren, Basispakete über
-  VPKG, Kernel auf die ESP.
+- **Dateien:** neues Paket `packages/base/veyra-installer/` (`veyra_install.py` Logik,
+  `veyra_fat.py` FAT32 für die ESP, `veyra-install` Kommandozeile),
+  `tests/installer/installer-test.sh`, `docs/installation.md`; geändert
+  `image/build-image.sh` (Kernel auch unter `/usr/lib/modules/VERSION/vmlinuz`),
+  `veyra-kontencheck` (Variante `system`), `.github/workflows/toolchain.yml`.
+- **Schritte:** Ziel nur nach Eingabe des Gerätenamens; Ablehnung bei eingehängtem,
+  benutztem, zu kleinem Ziel, Startmedium, Partition statt Datenträger und zweitem
+  `veyra-root`; vorhandene Systeme werden angezeigt; GPT mit ESP (512 MiB, FAT32,
+  Kernel als `BOOTX64.EFI`) und ext4-Root; System kopieren, root sperren,
+  Ersteinrichtung vormerken, Selbsttest per VPKG entfernen; `vpkg check` und
+  `veyra-kontencheck`; Root-Partition erst am Ende in `veyra-root` umbenennen.
+- **Abweichung:** Die Basispakete werden mit ihrer VPKG-Datenbank kopiert statt einzeln
+  über VPKG installiert (dafür fehlt ein Paket für die Grunddateien wie `/etc/passwd`).
 - **Abhängigkeiten/Risiken:** höchstes Risiko für Benutzerdaten; nur in QEMU mit leerer
   virtueller Platte testen, nie automatisch auf echter Hardware.
 - **Akzeptanz:** Installation in eine leere virtuelle Platte bootet bis zum Selbsttest OK.
-- **Testnachweis:** noch keiner.
+- **Testnachweis:** lokal (15.11.2026): `tests/installer/installer-test.sh` 15 von 15
+  (FAT32 mit `fsck.fat`, Ablehnungen, keine Änderung ohne Bestätigung, vorhandenes
+  System erkannt, Partitionen, Kernel auf der ESP, Konten, Selbsttest entfernt). CI-Lauf
+  mit Installation auf eine leere 4-GiB-Platte und Boot in QEMU steht aus.
 
 ### P3-3 Bootloader, UKI, Secure Boot, Btrfs-Snapshots ⬜
 - **Ziel/Begründung:** Mehrere Kernel, Rückfall auf einen alten Stand und Start mit

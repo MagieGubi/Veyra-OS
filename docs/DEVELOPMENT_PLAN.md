@@ -1,6 +1,6 @@
 # Veyra OS: Entwicklungsplan
 
-Stand: 14.11.2026. Grundlage: [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md). Einzelne Aufgaben
+Stand: 15.11.2026. Grundlage: [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md). Einzelne Aufgaben
 mit Dateien, Schritten, Risiken, Akzeptanzkriterien und Nachweis stehen in
 [../ROADMAP.md](../ROADMAP.md); dieser Plan ordnet sie den sieben Phasen der Spezifikation
 „Full Operating System Development Mission“ zu.
@@ -17,14 +17,16 @@ System bringt, und in der Reihenfolge der Abhängigkeiten:
 1. **Sichere Root-Konfiguration, Entwicklungs- und Testabbild trennen (P0-3).**
    Blocker für jeden Test auf echter Hardware: bisher konnte sich jeder am USB-Stick als
    root ohne Passwort anmelden. Der Installer braucht dieselbe Ersteinrichtung (Passwort,
-   erster Benutzer). **In dieser Iteration umgesetzt**, lokal getestet, CI-Boot steht aus.
+   erster Benutzer). **Erledigt** (CI-Lauf 43653042098).
 2. **Versionsbedingungen in VPKG (P1-3).** Ohne `name>=version` kann VPKG weder Updates
    in sicherer Reihenfolge noch einen Installer mit konsistenten Paketständen liefern.
-   Klein, gut testbar, keine Hardware nötig.
+   Klein, gut testbar, keine Hardware nötig. **Erledigt** (CI-Lauf 43753648158).
 3. **CLI-Installer auf eine virtuelle Platte (P3-2).** Der größte Schritt zu „installierbar“:
    Ziel nur nach ausdrücklicher Auswahl und Bestätigung, GPT mit ESP und ext4, Basispakete
    über VPKG, Ersteinrichtung aus Aufgabe 1. Test in QEMU mit leerer virtueller Platte.
-   Setzt einen Bootweg ohne festen Partitionsnamen voraus (Teil von P3-2/P3-3).
+   **Umgesetzt** mit dem vorhandenen Bootweg (Kernel direkt, `PARTLABEL=veyra-root`;
+   der Installer lehnt ab, wenn schon eine zweite Partition `veyra-root` existiert).
+   Lokal getestet, CI-Nachweis steht aus.
 
 ## Phase 1: Systemstabilität und Sicherheit (kritisch)
 
@@ -32,9 +34,9 @@ System bringt, und in der Reihenfolge der Abhängigkeiten:
 | --- | --- | --- |
 | Signierter Repository-Index, Downgrade-Schutz | P0-1 | ✅ |
 | Keine offenen Ports | P0-2 | ✅ |
-| Sichere Root-Konfiguration, Dev/Test getrennt, Ersteinrichtung, Kontenprüfung | P0-3 | 🟡 |
+| Sichere Root-Konfiguration, Dev/Test getrennt, Ersteinrichtung, Kontenprüfung | P0-3 | ✅ |
 | Transaktionen, Absturz-Wiederherstellung, Manifestprüfung | P1-1, P1-2 | ✅ |
-| Versionsbedingungen | P1-3 | ⬜ |
+| Versionsbedingungen | P1-3 | ✅ |
 | Reproduzierbarkeit von Paketen und Abbild | P1-4 | ⬜ |
 | `pre_remove`, fehlgeschlagene Install-Skripte | P1-6 | ⬜ |
 | PAM und sudo bewerten (für Login-Manager nötig) | P1-8 | ⬜ |

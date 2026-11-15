@@ -5,6 +5,7 @@
 #   dev       hoechstens root ohne Passwort (Entwicklungsabbild)
 #   test      kein Konto ohne Passwort; root gesperrt, solange die Ersteinrichtung aussteht;
 #             su nur fuer die Gruppe wheel
+#   system    installiertes System (veyra-install): dieselben Regeln wie test
 # Ausgabe: eine Zeile je Pruefung ("ok: ..." oder "FEHLER: ..."), Exitcode 1 bei Fehlern.
 # Aufruf: veyra-kontencheck [--root VERZ]
 set -uo pipefail
@@ -18,7 +19,7 @@ nein() { echo "FEHLER: $*"; fehler=1; }
 
 variante=$(cat "$etc/veyra/variante" 2>/dev/null || true)
 case $variante in
-  dev|test) ok "Variante $variante" ;;
+  dev|test|system) ok "Variante $variante" ;;
   *) nein "Variante unbekannt ('$variante' in /etc/veyra/variante)" ;;
 esac
 
@@ -45,7 +46,7 @@ if [ -z "$uid0" ]; then ok "nur root hat UID 0"; else nein "weitere Konten mit U
 leer=$(awk -F: '$2 == "" {print $1}' "$etc/shadow" | tr '\n' ' ')
 leer=${leer% }
 rootpw=$(awk -F: '$1 == "root" {print $2}' "$etc/shadow")
-if [ "$variante" = test ]; then
+if [ "$variante" = test ] || [ "$variante" = system ]; then
   if [ -z "$leer" ]; then ok "kein Konto ohne Passwort"; else nein "Konten ohne Passwort: $leer"; fi
   if [ -e "$etc/veyra/einrichtung-noetig" ]; then
     case $rootpw in

@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""veyra-install: Veyra OS auf einen Datentraeger installieren (Kommandozeile).
+
+  veyra-install liste                 Datentraeger mit Partitionen und erkannten Systemen
+  veyra-install pruefe ZIEL           was auf ZIEL liegt, ob und wie installiert wuerde
+  veyra-install installiere ZIEL      installieren (fragt nach dem Geraetenamen)
+
+ZIEL ist ein ganzer Datentraeger (/dev/sda, /dev/nvme0n1) oder eine vorhandene
+Abbild-Datei (virtuelle Platte). ALLE DATEN AUF ZIEL GEHEN VERLOREN. Ohne Bestaetigung
+wird nichts geschrieben: der Installer verlangt, dass der Geraetename eingetippt wird.
+
+Optionen fuer installiere:
+  --quelle VERZ        Quellsystem (Standard: /run/veyra-live/sfs, das Live-System)
+  --hostname NAME      Rechnername (Standard: veyra)
+  --mit-selbsttest     Selbsttest im installierten System behalten (fuer Tests in der VM)
+  --bestaetigt ZIEL    Bestaetigung ohne Rueckfrage (nur fuer automatische Tests auf
+                       virtuellen Platten); muss genau ZIEL entsprechen
+"""
+import argparse
+import os
+import re
+import sys
+
+sys.path.insert(0, "/usr/lib/veyra/installer")
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import veyra_install as vi  # noqa: E402
+
+
+def zeige_partitionen(teile, einzug="    ", lesbar=True):
+    if not lesbar:
+        print(f"{einzug}Inhalt unbekannt (nicht lesbar)")
+        return
+    if not teile:
+        print(f"{einzug}keine Partitionen, kein Dateisystem erkannt (leer)")
+    for i, t in enumerate(teile, 1):
+        name = f" \"{t['name']}\"" if t.get("name") else ""
+        bez = f", Bezeichnung {t['bezeichnung']}" if t.get("bezeichnung") else ""
+        print(f"{einzug}{i}. {vi.mib(t['groesse']):>9}{name}: {t['system']}{bez}")
+
+
+def cmd_liste(_args):
+    for d in vi.datentraeger():
+        teile = [vi.mib(int(d["size"])), (d.get("model") or "").strip(), d.get("tran") or "",
+                 "wechselbar" if str(d.get("rm")) in ("1", "True", "true") else ""]
+        print(f"{d['path']}  " + ", ".join(x for x in teile if x))
+        info = vi.untersuche(d["path"])
+        zeige_partitionen(info["partitionen"], lesbar=info["lesbar"])
+        for h in info["hindernisse"]:
+            print(f"    nicht verwendbar: {h}")
+    return 0
+
+
+def bericht(info, quelle):
+    print(f"Ziel: {info['ziel']} ({'Abbild-Datei' if info['art'] == 'datei' else 'Datentraeger'}"
+          f"{', ' + info['modell'] if info.get('modell') else ''}), {vi.mib(info['groesse'])}")
+    print("Jetzt darauf:")
+    zeige_partitionen(info["partitionen"], lesbar=info["lesbar"])
+    if info["hindernisse"]:
+        print("Installation nicht moeglich:")
+        for h in info["hindernisse"]:
+            print(f"  - {h}")
+        return False
+    print(f"Quelle: {quelle} (mindestens {vi.mib(info['mindestgroesse'])} noetig)")
+    print("Danach (GPT):")
+    for p in vi.plan(info):
+        print(f"    {p['nr']}. {vi.mib(p['groesse']):>9} \"{p['name']}\": {p['typ']}")
+    return True
+
+
+def cmd_pruefe(args):
+    vi.pruefe_quelle(args.quelle)
+    return 0 if bericht(vi.untersuche(args.ziel, args.quelle), args.quelle) else 1
+
+
+def cmd_installiere(args):
+    if os.geteuid() != 0:
+        print("veyra-install installiere braucht root", file=sys.stderr)
+        return 1
+    if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,62})", args.hostname):
+        print(f"ungueltiger Rechnername: {args.hostname}", file=sys.stderr)
+        return 1
+    vi.pruefe_quelle(args.quelle)
+    info = vi.untersuche(args.ziel, args.quelle)
+    if not bericht(info, args.quelle):
+        return 1
+    belegt = info["partitionen"]
+    print()
+    print(f"ACHTUNG: Alle Daten auf {args.ziel} werden geloescht"
+          + (f", darunter {len(belegt)} vorhandene Partition(en)." if belegt else "."))
+    if args.bestaetigt is not None:
+        if args.bestaetigt != args.ziel:
+            print(f"--bestaetigt {args.bestaetigt} passt nicht zu {args.ziel}: Abbruch, nichts geaendert",
+                  file=sys.stderr)
+            return 1
+        print(f"Bestaetigt per --bestaetigt {args.bestaetigt}")
+    else:
+        try:
+            antwort = input(f"Zum Bestaetigen den Geraetenamen eintippen ({args.ziel}): ").strip()
+        except EOFError:
+            antwort = ""
+        if antwort != args.ziel:
+            print("Nicht bestaetigt: Abbruch, nichts geaendert.")
+            return 1
+    vi.installiere(args.ziel, args.quelle, mit_selbsttest=args.mit_selbsttest,
+                   hostname=args.hostname, melde=lambda s: print(f">> {s}", flush=True))
+    print(f"Installation fertig. Beim naechsten Start von {args.ziel} (UEFI, Secure Boot aus) "
+          "fragt Veyra an Konsole 1 nach dem root-Passwort.")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="veyra-install", description=__doc__.split("\n")[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="befehl", required=True)
+    sub.add_parser("liste", help="Datentraeger auflisten")
+    for name in ("pruefe", "installiere"):
+        p = sub.add_parser(name)
+        p.add_argument("ziel")
+        p.add_argument("--quelle", default=vi.LIVE_QUELLE)
+        if name == "installiere":
+            p.add_argument("--hostname", default="veyra")
+            p.add_argument("--mit-selbsttest", action="store_true")
+            p.add_argument("--bestaetigt")
+    args = ap.parse_args()
+    try:
+        return {"liste": cmd_liste, "pruefe": cmd_pruefe, "installiere": cmd_installiere}[args.befehl](args)
+    except vi.InstallFehler as e:
+        print(f"FEHLER: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nAbgebrochen.", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

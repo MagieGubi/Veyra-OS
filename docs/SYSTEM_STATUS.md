@@ -1,6 +1,6 @@
 # Veyra OS: Systemstatus
 
-Stand: 14.11.2026. Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
+Stand: 15.11.2026. Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
 [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md), Planung: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md),
 Aufgaben mit Akzeptanzkriterien: [../ROADMAP.md](../ROADMAP.md).
 
@@ -16,7 +16,7 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | Cross-Toolchain (GCC 15.2.0, glibc 2.42) | ✅ | CI |
 | Kernel 6.18.56-veyra2 | ✅ | zwei unabhängige Builds bit-identisch (Job „Kernel reproduzierbar?“) |
 | Basissystem (68 Pakete, glibc bis systemd 257.8) | ✅ | CI Stufe 4b; reproduzierbar ungeprüft |
-| VPKG 0.4 (Installieren, Entfernen, Abhängigkeiten mit Versionsbedingungen, Konflikte, Transaktionen, Signaturen, signierter Index) | 🟡 | 0.3 mit CI-Nachweis; Versionsbedingungen lokal getestet (27 Tests als root, 28 ohne root), CI steht aus |
+| VPKG 0.4 (Installieren, Entfernen, Abhängigkeiten mit Versionsbedingungen, Konflikte, Transaktionen, Signaturen, signierter Index) | ✅ | Lauf [43753648158](https://github.com/MagieGubi/Veyra-OS/actions/runs/43753648158), alle Jobs grün; Versionsbedingungen mit 27 Tests als root, 28 ohne root |
 | VPKG: Gruppen, Metapakete, Cache, Mirrors, HTTPS mit Mirror-Liste | ⬜ | – |
 | Paket-Repository | 🔧 | wird pro Lauf als CI-Artefakt gebaut und signiert (7 Tage); kein dauerhaftes Online-Repository |
 | Boot (UEFI, Kernel direkt als `BOOTX64.EFI`) | ✅ | Login nach etwa 7 s in QEMU |
@@ -27,7 +27,7 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | WLAN, Bluetooth, Audio, Firewall, Zeitsynchronisierung, Drucker | ⬜ | – |
 | Hardware (NVMe, USB, Intel-Grafik, Tastatur) | 🔧 | Treiber im Kernel, nie auf echter Hardware geprüft |
 | Firmware | ⬜ | `regulatory.db` fehlt laut Kernel-Log |
-| Installer | ⬜ | – |
+| Installer (`veyra-install`, Kommandozeile, ganzer Datenträger, GPT mit ESP und ext4) | 🟡 | 15 Tests auf virtuellen Platten lokal; Installation auf leere virtuelle Platte und Boot in QEMU im CI steht aus; nie auf echter Hardware |
 | Updates und Rollback des Systems | ⬜ | nur Paket-Transaktionen mit Rücknahme |
 | Recovery | 🔧 | Live-ISO startet; kein dokumentierter Rettungsablauf |
 | Grafische Oberfläche | ⬜ | – |

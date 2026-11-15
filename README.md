@@ -24,7 +24,8 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Paketverwaltung VPKG 0.4 (installieren, entfernen, Abhängigkeiten mit Versionsbedingungen, Transaktionen mit Rücknahme, signierter Repository-Index, Downgrade-Schutz) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 25 Tests grün, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
 | Paketsignaturen (Ed25519), Paket-Repository als CI-Artefakt | `packages/base/veyra-keyring/`, [docs/signaturen.md](docs/signaturen.md) | eingebaut, Schlüssel `veyra-2026` aktiv |
 | Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 6,4 s ab QEMU-Start mit KVM, [Messwerte](docs/messwerte.md)) |
-| Entwicklungs- und Testabbild getrennt: im Testabbild root gesperrt bis zur Ersteinrichtung (root-Passwort, erster Benutzer), Prüfung von Konten und Rechten | `packages/base/veyra-konten/`, `image/build-image.sh` (`VARIANTE=test`) | lokal getestet, Boot im CI steht aus |
+| Entwicklungs- und Testabbild getrennt: im Testabbild root gesperrt bis zur Ersteinrichtung (root-Passwort, erster Benutzer), Prüfung von Konten und Rechten | `packages/base/veyra-konten/`, `image/build-image.sh` (`VARIANTE=test`) | 17 Konten- und 4 Abbild-Tests, Testabbild bootet in QEMU (CI) |
+| Installer `veyra-install` (Kommandozeile): ganzer Datenträger, GPT mit EFI-Partition und ext4, Bestätigung per Gerätenamen, erkennt vorhandene Systeme | `packages/base/veyra-installer/`, [docs/installation.md](docs/installation.md) | 15 Tests auf virtuellen Platten lokal; Installation und Boot in QEMU im CI steht aus; nie auf echter Hardware |
 | Netzwerk per Kabel (DHCP, Namensauflösung), Prüfung auf fehlgeschlagene Dienste und sauberes Herunterfahren | `packages/base/veyra-netzwerk/`, `image/boot-test.sh`, [Phase 6](docs/phase6.md) | in QEMU getestet (Abbild und Live-ISO), nicht auf echter Hardware |
 
 ## Bauen
@@ -55,6 +56,7 @@ bash tests/vpkg/vpkg-test.sh
 - [docs/architecture.md](docs/architecture.md): Architektur und Entscheidungen
 - [docs/vpkg-format.md](docs/vpkg-format.md): Paket- und Rezeptformat
 - [docs/vpkg.md](docs/vpkg.md): Bedienung von VPKG 0.4
+- [docs/installation.md](docs/installation.md): Veyra mit `veyra-install` installieren
 - [docs/phase6.md](docs/phase6.md): Phase 6, Bestandsaufnahme und VPKG-Transaktionen
 - [docs/signaturen.md](docs/signaturen.md): Paketsignaturen
 - [docs/virtualbox.md](docs/virtualbox.md): Veyra in VirtualBox starten (fertige VDI-Festplatte)

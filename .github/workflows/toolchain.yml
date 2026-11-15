@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh packages/base/veyra-konten/veyra-*
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh packages/base/veyra-konten/veyra-*
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -35,6 +35,10 @@ jobs:
         run: sudo bash tests/konten/konten-test.sh
       - name: Abbild-Varianten testen (dev und test, mit Probe-System)
         run: sudo bash tests/image/variante-test.sh
+      - name: Installer testen (nur virtuelle Platten, Probe-System)
+        run: |
+          python3 -m py_compile packages/base/veyra-installer/veyra_install.py packages/base/veyra-installer/veyra_fat.py
+          sudo bash tests/installer/installer-test.sh
       - name: Rezepte und Quellenlisten pruefen
         run: |
           for r in packages/*/*/recipe.sh; do bash -n "$r"; done
@@ -482,9 +486,9 @@ jobs:
           pattern: pakete-4b-*
           path: basis
 
-      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, vpkg, Selbsttest)
+      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, vpkg, Selbsttest)
         run: |
-          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/vpkg packages/test/veyra-selftest; do
+          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/vpkg packages/test/veyra-selftest; do
             build/scripts/vpkg-build --srcdir "$PWD" --outdir extra "$r"
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
@@ -543,6 +547,41 @@ jobs:
             SHA256SUMS-vdi
             docs/virtualbox.md
           retention-days: 7
+
+      # Installer (P3-2): das Entwicklungsabbild dient als Quelle (wie das SquashFS der
+      # Live-ISO), Ziel ist eine leere virtuelle Platte. Danach startet QEMU das installierte
+      # System von dieser Platte; der Selbsttest bleibt dafuer drin (--mit-selbsttest).
+      - name: Installer auf leere virtuelle Platte
+        if: success()
+        run: |
+          set -o pipefail
+          read -r start size < <(sfdisk -J veyra-core-0.1.img | python3 -c '
+          import json, sys
+          p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
+          print(p["start"] * 512, p["size"] * 512)')
+          loop=$(sudo losetup --find --show --read-only --offset "$start" --sizelimit "$size" veyra-core-0.1.img)
+          sudo mkdir -p /mnt/quelle
+          sudo mount -o ro "$loop" /mnt/quelle
+          truncate -s 4G installiert.img
+          sudo packages/base/veyra-installer/veyra-install installiere "$PWD/installiert.img" \
+            --quelle /mnt/quelle --mit-selbsttest --bestaetigt "$PWD/installiert.img" | tee installer.log
+          sudo umount /mnt/quelle
+          sudo losetup -d "$loop"
+          sfdisk -l installiert.img | tee -a installer.log
+      - name: Boot-Test des installierten Systems und Selbsttest
+        if: success()
+        run: |
+          SELFTEST=1 image/boot-test.sh installiert.img installiert-boot.log 600
+          rm -f installiert.img
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veyra-installer-test
+          path: |
+            installer.log
+            installiert-boot.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Paket-Repository zusammenstellen
         if: success()
