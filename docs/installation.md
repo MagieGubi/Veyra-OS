@@ -1,7 +1,8 @@
 # Veyra installieren (veyra-install)
 
-Stand: 15.11.2026, Installer 0.1. **Bisher nur auf virtuellen Platten geprüft**
-(Tests in `tests/installer/installer-test.sh`, Installation und Boot in QEMU im CI).
+Stand: 16.11.2026, Installer 0.1. **Bisher nur auf virtuellen Platten geprüft**
+(Tests in `tests/installer/installer-test.sh`; im CI Installation auf eine leere
+8-GiB-Platte und Boot mit Selbsttest in QEMU, zuerst grün in Lauf [43856635308](https://github.com/MagieGubi/Veyra-OS/actions/runs/43856635308)).
 Auf einem echten Datenträger ist der Installer noch nie gelaufen.
 
 ## Was der Installer macht

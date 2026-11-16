@@ -1,6 +1,6 @@
 # Veyra OS: Entwicklungsplan
 
-Stand: 15.11.2026. Grundlage: [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md). Einzelne Aufgaben
+Stand: 16.11.2026. Grundlage: [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md). Einzelne Aufgaben
 mit Dateien, Schritten, Risiken, Akzeptanzkriterien und Nachweis stehen in
 [../ROADMAP.md](../ROADMAP.md); dieser Plan ordnet sie den sieben Phasen der Spezifikation
 „Full Operating System Development Mission“ zu.
@@ -26,7 +26,7 @@ System bringt, und in der Reihenfolge der Abhängigkeiten:
    über VPKG, Ersteinrichtung aus Aufgabe 1. Test in QEMU mit leerer virtueller Platte.
    **Umgesetzt** mit dem vorhandenen Bootweg (Kernel direkt, `PARTLABEL=veyra-root`;
    der Installer lehnt ab, wenn schon eine zweite Partition `veyra-root` existiert).
-   Lokal getestet, CI-Nachweis steht aus.
+   **Erledigt** (CI-Lauf 43856635308, installierte Platte bootet in QEMU).
 
 ## Phase 1: Systemstabilität und Sicherheit (kritisch)
 

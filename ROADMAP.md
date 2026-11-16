@@ -297,7 +297,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Akzeptanz:** der Selbsttest führt `vpkg upgrade` gegen das Online-Repository aus.
 - **Testnachweis:** noch keiner.
 
-### P3-2 Installation auf eine Festplatte 🟡
+### P3-2 Installation auf eine Festplatte ✅
 - **Ziel/Begründung:** Veyra läuft bisher nur als fertiges Abbild oder Live-System.
 - **Dateien:** neues Paket `packages/base/veyra-installer/` (`veyra_install.py` Logik,
   `veyra_fat.py` FAT32 für die ESP, `veyra-install` Kommandozeile),
@@ -318,7 +318,11 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Testnachweis:** lokal (15.11.2026): `tests/installer/installer-test.sh` 15 von 15
   (FAT32 mit `fsck.fat`, Ablehnungen, keine Änderung ohne Bestätigung, vorhandenes
   System erkannt, Partitionen, Kernel auf der ESP, Konten, Selbsttest entfernt). CI-Lauf
-  mit Installation auf eine leere 8-GiB-Platte und Boot in QEMU steht aus.
+  [43856635308](https://github.com/MagieGubi/Veyra-OS/actions/runs/43856635308) (16.11.2026): Installation auf eine leere 8-GiB-Platte, Boot in QEMU
+  (Login nach 6,6 s), Selbsttest OK mit „Konten und Rechte: ok (Variante system)“ und
+  „Ersteinrichtung: wartet an Konsole 1“, sauber heruntergefahren. Dabei gefunden und
+  behoben: Testplatte zu klein (System braucht knapp 6 GiB), `vpkg check` meldete
+  `/run/dbus` fälschlich als fehlend (VPKG 0.4.1). Nie auf echter Hardware.
 
 ### P3-3 Bootloader, UKI, Secure Boot, Btrfs-Snapshots ⬜
 - **Ziel/Begründung:** Mehrere Kernel, Rückfall auf einen alten Stand und Start mit
