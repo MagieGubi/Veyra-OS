@@ -393,6 +393,18 @@ abgelehnt "ungueltige Liste 'depends'" python3 "$here/packages/base/vpkg/vpkg" i
 abgelehnt "ungueltige Liste 'depends'" vv install "$t/kaputt/kaputt-1-1-x86_64.vpkg"
 ok "Versionsbedingung: check meldet Verletzung, falsche Syntax wird abgelehnt (index, install)"
 
+d=$t/r/laufzeit && mkdir -p "$d"
+# shellcheck disable=SC2016 # $pkgdir gehoert ins Rezept, nicht in diese Shell
+printf 'pkgname=laufzeit pkgver=1 license=MIT\npackage() { install -d "$pkgdir/run/laufzeit" "$pkgdir/var/lib/laufzeit"; }\n' > "$d/recipe.sh"
+mkdir -p "$t/laufzeit" && "$build" --srcdir "$t" --outdir "$t/laufzeit" "$d" >/dev/null
+vv install --no-deps "$t/laufzeit/laufzeit-1-1-x86_64.vpkg" >/dev/null || fail "laufzeit nicht installiert"
+rmdir "$vr/run/laufzeit"
+vv check laufzeit >/dev/null || fail "fehlendes Verzeichnis unter /run als Fehler gemeldet"
+rmdir "$vr/var/lib/laufzeit"
+if vv check laufzeit > "$t/out" 2>&1; then fail "fehlendes Verzeichnis ausserhalb /run nicht gemeldet"; fi
+grep -q 'laufzeit: Verzeichnis fehlt: /var/lib/laufzeit' "$t/out" || fail "check-Meldung: $(cat "$t/out")"
+ok "check: fehlende Verzeichnisse unter /run (tmpfs im laufenden System) sind kein Fehler, sonst schon"
+
 # Die eigenen Pakete (wie im CI-Job "image" gebaut) muessen die Manifestpruefung bestehen;
 # vpkg selbst bringt z. B. die leeren Verzeichnisse der Paketdatenbank mit.
 mkdir "$t/eigene"

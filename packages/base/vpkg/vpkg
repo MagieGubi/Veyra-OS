@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# vpkg 0.4: Paketverwaltung von Veyra OS (ab 0.4 mit Versionsbedingungen in depends).
+# vpkg 0.4.1: Paketverwaltung von Veyra OS (ab 0.4 mit Versionsbedingungen in depends).
 #
 # Installiert, aktualisiert und entfernt .vpkg-Pakete (Format: docs/vpkg-format.md),
 # loest Abhaengigkeiten auf und fuehrt Buch darueber, welche Datei zu welchem Paket gehoert.
@@ -44,7 +44,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 
-VERSION = "0.4"
+VERSION = "0.4.1"
 DB = "var/lib/vpkg"
 TXN = DB + "/txn"
 REPO_STAND = DB + "/repo-stand.json"
@@ -1147,7 +1147,10 @@ def check_package(system, name, m):
         dst = system.path(rel)
         t = e["type"]
         if t == "dir":
-            if not os.path.isdir(dst):
+            # /run ist im laufenden System ein tmpfs: Verzeichnisse darunter (z. B. /run/dbus)
+            # legen Dienste beim Start an. Auf einem nicht gestarteten System (Installer,
+            # vpkg --root) fehlen sie zu Recht.
+            if not os.path.isdir(dst) and not (rel == "run" or rel.startswith("run/")):
                 errs.append(f"{name}: Verzeichnis fehlt: /{rel}")
         elif t == "symlink":
             if not os.path.islink(dst) or os.readlink(dst) != e["target"]:

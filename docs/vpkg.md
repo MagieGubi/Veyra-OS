@@ -14,7 +14,7 @@ weiß zu jeder Datei, zu welchem Paket sie gehört.
 | `vpkg info NAME` | Beschreibung, Abhängigkeiten, wer das Paket braucht. |
 | `vpkg files NAME` | Dateien eines Pakets. |
 | `vpkg owner PFAD` | Zu welchem Paket eine Datei gehört. |
-| `vpkg check [NAME...]` | Installierte Dateien gegen die Prüfsummen prüfen, fehlende Abhängigkeiten melden. |
+| `vpkg check [NAME...]` | Installierte Dateien gegen die Prüfsummen prüfen, fehlende Abhängigkeiten melden. Fehlende Verzeichnisse unter `/run` (im laufenden System ein tmpfs) gelten seit 0.4.1 nicht als Fehler. |
 | `vpkg recover` | Einen unterbrochenen Vorgang (Absturz, Stromausfall) zurücknehmen. Passiert auch automatisch beim nächsten schreibenden Befehl. |
 | `vpkg register PAKET...` | Pakete eintragen, deren Dateien schon im System liegen (Bau des Basissystems). |
 | `vpkg index VERZ` | `index.toml` für ein Repository-Verzeichnis schreiben. |
