@@ -6,7 +6,7 @@
 # Beide Programme liegen neben diesem Rezept; bei jeder Aenderung daran muss sha256sums
 # angepasst werden (tests/konten/konten-test.sh prueft das).
 pkgname=veyra-konten
-pkgver=0.2
+pkgver=0.3
 pkgrel=1
 pkgdesc="Ersteinrichtung: root-Passwort und erster Benutzer"
 license=MIT
@@ -45,6 +45,20 @@ UNIT
 [Unit]
 ConditionPathExists=!/etc/veyra/einrichtung-noetig
 CONF
+  # Ohne PAM gibt es keine logind-Sitzung: die Login-Shell laeuft im getty-Dienst selbst
+  # (login ersetzt sich durch die Shell). Eine interaktive bash ignoriert SIGTERM, und so
+  # wartete das Herunterfahren nach einer Anmeldung bis zu 90 s auf SIGKILL (CI-Laeufe
+  # 44054508868 und 44169569286). SIGHUP beendet die Shell sofort; spaetestens nach 5 s
+  # wird sie beendet, wie es logind mit einer Sitzung auch taete.
+  for u in getty@ serial-getty@; do
+    install -d "$pkgdir/usr/lib/systemd/system/$u.service.d"
+    cat > "$pkgdir/usr/lib/systemd/system/$u.service.d/60-veyra-stopp.conf" <<'CONF'
+# Login-Shells duerfen das Herunterfahren nicht aufhalten (siehe veyra-konten).
+[Service]
+SendSIGHUP=yes
+TimeoutStopSec=5s
+CONF
+  done
   ln -s ../veyra-einrichtung.service \
     "$pkgdir/usr/lib/systemd/system/multi-user.target.wants/veyra-einrichtung.service"
 }

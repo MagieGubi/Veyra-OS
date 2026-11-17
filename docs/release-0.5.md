@@ -43,8 +43,10 @@ nie gestartet worden.**
   (Abbilder 7 Tage).
 - Das installierte System enthält den Compiler und Entwicklungsdateien (knapp 6 GiB).
 - Kein PAM, kein `sudo`.
-- Im ersten CI-Lauf hing das Herunterfahren einmal 90 s (nicht wiederholbar); der Test
-  schlägt jetzt fehl, wenn es länger als 60 s dauert, und nennt den Dienst.
+- Behoben vor 0.5.0: Nach einer Anmeldung hing das Herunterfahren manchmal 90 s. Ohne PAM
+  läuft die Login-Shell im getty-Dienst, und eine interaktive bash ignoriert SIGTERM.
+  getty-Dienste senden jetzt SIGHUP und warten höchstens 5 s; der Installationstest
+  schlägt fehl, wenn das Herunterfahren länger als 30 s dauert.
 - Reproduzierbar gebaut wird nachweislich nur der Kernel.
 
 ## Artefakte (CI-Lauf, Anmeldung bei GitHub nötig)
@@ -58,6 +60,6 @@ nie gestartet worden.**
 
 ## Komponenten
 
-Kernel 6.18.56-veyra2, VPKG 0.5, Installer 0.3, veyra-konten 0.2, veyra-zertifikate
+Kernel 6.18.56-veyra2, VPKG 0.5, Installer 0.3, veyra-konten 0.3, veyra-zertifikate
 2026.10.23, Selbsttest 0.7, Basissystem: 68 Pakete nach LFS 12.4 (glibc 2.42, GCC 15.2.0,
 systemd 257.8).

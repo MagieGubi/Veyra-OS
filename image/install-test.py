@@ -149,7 +149,7 @@ class VM:
         self.sende(cmd + "\r")
         return self.erwarte(muster, zeit)
 
-    def ende(self, zeit=240, erlaubt=60):
+    def ende(self, zeit=240, erlaubt=30):
         """Wartet aufs Ausschalten. Dauert es laenger als ERLAUBT Sekunden, ist das ein
         Fehler; gewartet wird trotzdem bis ZEIT, damit systemd im Log zeigt, welcher
         Dienst haengt ("A stop job is running for ...")."""
