@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# veyra-rootpruefung: warnt beim Start, wenn mehr als eine Partition "veyra-root" heisst.
+# Der Kernel sucht Root ueber root=PARTLABEL=veyra-root (fest eingebaut). Haengen zwei
+# Veyra-Datentraeger am Rechner (installierte Platte und USB-Stick), ist nicht festgelegt,
+# welcher startet. Die Warnung steht im Journal, auf der Konsole und ueber der
+# Anmeldeaufforderung (agetty liest /run/issue.d). Sie aendert nichts am System.
+set -u
+issue_dir=${VEYRA_ISSUE_DIR:-/run/issue.d}
+datei=$issue_dir/50-veyra-root.issue
+
+geraete=$(lsblk -rnpo NAME,PARTLABEL 2>/dev/null | awk '$2 == "veyra-root" { print $1 }')
+anzahl=$(printf '%s\n' "$geraete" | grep -c . || true)
+if [ "$anzahl" -le 1 ]; then
+  rm -f "$datei"
+  exit 0
+fi
+root=$(findmnt -no SOURCE / 2>/dev/null || echo unbekannt)
+liste=$(printf '%s\n' "$geraete" | paste -sd ' ' -)
+text="WARNUNG: $anzahl Partitionen heissen veyra-root ($liste). Gestartet ist $root.
+Welcher Datentraeger startet, ist dann nicht festgelegt. Vor Updates oder einer
+Installation den zusaetzlichen Veyra-Datentraeger abziehen."
+echo "$text" >&2
+mkdir -p "$issue_dir"
+printf '%s\n\n' "$text" > "$datei"
+exit 0

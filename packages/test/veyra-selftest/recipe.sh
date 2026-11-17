@@ -6,12 +6,12 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.6
+pkgver=0.7
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg systemd bash iproute2 veyra-netzwerk veyra-konten)
+depends=(vpkg systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -95,6 +95,26 @@ if n=$(timeout 15 getent hosts github.com); then
 else
   log "Namensaufloesung: nicht moeglich (kein Internet?), kein Fehler"
 fi
+# Wurzelzertifikate (veyra-zertifikate): ohne sie vertraut das System keinem https-Server.
+# Mit Internet wird eine echte Verbindung geprueft; ein Zertifikatsfehler ist ein Fehler,
+# ein Netzfehler nicht (kein Internet ist kein Fehler des Systems).
+tls=$(python3 - <<'PYT' 2>&1
+import socket, ssl, sys
+ctx = ssl.create_default_context()
+n = len(ctx.get_ca_certs())
+if n < 100:
+    print(f"FEHLER (nur {n} Wurzelzertifikate geladen)"); sys.exit(1)
+try:
+    with socket.create_connection(("github.com", 443), timeout=10) as s:
+        with ctx.wrap_socket(s, server_hostname="github.com") as t:
+            print(f"ok ({n} Wurzelzertifikate, github.com per {t.version()} geprueft)")
+except ssl.SSLCertVerificationError as e:
+    print(f"FEHLER (Zertifikat von github.com nicht geprueft: {e.verify_message})"); sys.exit(1)
+except OSError as e:
+    print(f"ok ({n} Wurzelzertifikate; github.com nicht erreichbar, kein Fehler: {e})")
+PYT
+) || fail=1
+log "TLS: $tls"
 # Nichts darf von aussen erreichbar sein: keine TCP/UDP-Ports ausser auf Loopback. Ausnahme
 # sind die Antwort-Ports der DHCP-Clients (UDP 68 fuer IPv4, 546 fuer IPv6).
 offen=$(ss -H -tuln 2>/dev/null | awk '{print $1 " " $5}' \

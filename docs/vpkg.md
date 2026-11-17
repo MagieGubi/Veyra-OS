@@ -1,4 +1,4 @@
-# VPKG 0.4: Bedienung
+# VPKG 0.5: Bedienung
 
 `vpkg` ist die Paketverwaltung von Veyra OS (`packages/base/vpkg/vpkg`, Python 3.11+,
 nur Standardbibliothek, dazu `zstd`, `tar` und `openssl`). Sie installiert, aktualisiert
@@ -9,11 +9,12 @@ weiß zu jeder Datei, zu welchem Paket sie gehört.
 | --- | --- |
 | `vpkg install PAKET...` | `.vpkg`-Dateien oder Namen aus dem Repository installieren; fehlende Abhängigkeiten kommen aus dem Repository dazu. Ist ein Paket schon installiert, wird es aktualisiert (alte Dateien, die in der neuen Version fehlen, werden entfernt). Eine ältere Version als die installierte nur mit `--allow-downgrade`. |
 | `vpkg upgrade` | Alle installierten Pakete, für die das Repository eine neuere Version hat, aktualisieren. |
-| `vpkg remove NAME...` | Pakete entfernen. Abgelehnt, solange ein anderes Paket sie braucht. |
+| `vpkg remove NAME...` | Pakete entfernen. Abgelehnt, solange ein anderes Paket sie braucht. Führt vorher `pre_remove` aus; scheitert es, wird nichts entfernt (`--no-scripts`: ohne Skript). |
 | `vpkg list` | Installierte Pakete mit Version. |
 | `vpkg info NAME` | Beschreibung, Abhängigkeiten, wer das Paket braucht. |
 | `vpkg files NAME` | Dateien eines Pakets. |
 | `vpkg owner PFAD` | Zu welchem Paket eine Datei gehört. |
+| `vpkg rerun-script NAME` | `post_install` eines installierten Pakets erneut ausführen (nach einem gescheiterten Install-Skript, ab 0.5). |
 | `vpkg check [NAME...]` | Installierte Dateien gegen die Prüfsummen prüfen, fehlende Abhängigkeiten melden. Fehlende Verzeichnisse unter `/run` (im laufenden System ein tmpfs) gelten seit 0.4.1 nicht als Fehler. |
 | `vpkg recover` | Einen unterbrochenen Vorgang (Absturz, Stromausfall) zurücknehmen. Passiert auch automatisch beim nächsten schreibenden Befehl. |
 | `vpkg register PAKET...` | Pakete eintragen, deren Dateien schon im System liegen (Bau des Basissystems). |
@@ -89,7 +90,7 @@ bleibt die geänderte Datei als `DATEI.vpkgsave`.
 
 ## Repository
 
-Ein Repository ist ein Verzeichnis (oder eine http(s)-Adresse) mit `.vpkg`-Dateien,
+Ein Repository ist ein Verzeichnis (oder eine https-Adresse) mit `.vpkg`-Dateien,
 den zugehörigen `.sig`-Dateien und einem `index.toml` von `vpkg index`. Die Quelle steht
 in `/etc/vpkg/repo` oder wird mit `--repo` angegeben. Das CI stellt bei jedem Lauf ein
 Repository mit allen Paketen als Artefakt `veyra-repo` bereit; öffentlich gehostet ist
@@ -106,6 +107,12 @@ Ab VPKG 0.3 ist auch der Index geschützt (Aufbau: [vpkg-format.md](vpkg-format.
 - Jeder Eintrag wird geprüft: Paketname, Dateiname (nur ein Name, kein Pfad), Prüfsumme,
   Version, Abhängigkeiten. Das geladene Paket muss genau dem Eintrag entsprechen (Name,
   Version, Abhängigkeiten), sonst wird es abgelehnt, auch wenn es selbst gültig signiert ist.
+- Netzquellen nur über **https** (ab VPKG 0.5): das Zertifikat wird gegen die
+  Systemzertifikate geprüft (Paket `veyra-zertifikate`: Mozilla-CA-Bündel aus certifi,
+  `/etc/ssl/cert.pem`), `http://` und andere Schemata werden abgelehnt, ebenso eine
+  Umleitung auf eine Adresse ohne https. Index und Signaturen dürfen höchstens 16 MiB,
+  Pakete höchstens 4 GiB groß sein. Nur ein 404 gilt als „Datei nicht vorhanden“; jeder
+  andere Fehler bricht ab.
 - Das Repository wird erst geladen, wenn es gebraucht wird (Paketname oder fehlende
   Abhängigkeit). Eine lokale Paketdatei installiert sich auch ohne erreichbares Repository.
 
@@ -116,7 +123,7 @@ installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgäng
 `/var/lib/vpkg/txn/` gibt es nur während eines Vorgangs (siehe Transaktionen),
 `/var/lib/vpkg/repo-stand.json` hält den zuletzt angenommenen Index-Stand je Quelle.
 
-## Grenzen von 0.4
+## Grenzen von 0.5
 
 - Install-Skripte lassen sich nicht zurücknehmen (siehe oben).
 - Die Transaktion schützt vor Abbrüchen, nicht vor Fremdeingriffen: wer während eines
@@ -125,6 +132,6 @@ installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgäng
   nicht ältere als die schon gesehenen ausliefern). Ein Ablaufdatum braucht eine
   verlässliche Uhrzeit im System und folgt später.
 - Ohne Schlüssel in `/etc/vpkg/keys` wird weder Index noch Paket auf Signaturen geprüft.
-- Kein `pre_remove`; keine Paketgruppen oder Metapakete; Abruf nur aus einem lokalen
+- Keine Paketgruppen oder Metapakete; Abruf nur aus einem lokalen
   Verzeichnis oder einer Adresse ohne Mirror-Liste und Cache.
 - Kernel und Kernelmodule sind noch kein Paket.

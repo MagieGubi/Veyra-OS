@@ -2,13 +2,13 @@
 # Das Programm liegt neben diesem Rezept (Datei vpkg); bei jeder Aenderung daran muss
 # sha256sums angepasst werden (tests/vpkg/run.sh prueft das).
 pkgname=vpkg
-pkgver=0.4.1
+pkgver=0.5
 pkgrel=1
 pkgdesc="Paketverwaltung von Veyra OS"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(vpkg)
-sha256sums=(bdd29ad17a5a1b3a54e9da24a955473b92db8054bbed5782e6255c0d9f808451)
+sha256sums=(ebcd4236946f0397812e4b01a95ed1cb9cef954abb8b7588412f4681f2f4499b)
 depends=(python bash coreutils tar zstd openssl)
 
 package() {

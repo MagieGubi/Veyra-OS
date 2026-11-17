@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# vpkg 0.4.1: Paketverwaltung von Veyra OS (ab 0.4 mit Versionsbedingungen in depends).
+# vpkg 0.5: Paketverwaltung von Veyra OS (ab 0.4 mit Versionsbedingungen in depends).
 #
 # Installiert, aktualisiert und entfernt .vpkg-Pakete (Format: docs/vpkg-format.md),
 # loest Abhaengigkeiten auf und fuehrt Buch darueber, welche Datei zu welchem Paket gehoert.
@@ -41,10 +41,11 @@ import sys
 import tempfile
 import time
 import tomllib
+import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "0.4.1"
+VERSION = "0.5"
 DB = "var/lib/vpkg"
 TXN = DB + "/txn"
 REPO_STAND = DB + "/repo-stand.json"
@@ -580,10 +581,31 @@ def provides_map(pkgs):
 
 # ---------------------------------------------------------------- Repository
 
+MAX_META = 16 << 20        # Obergrenze fuer index.toml und Signaturen aus dem Netz
+MAX_PAKET = 4 << 30        # Obergrenze fuer ein Paket aus dem Netz
+
+
+class _NurHttps(urllib.request.HTTPRedirectHandler):
+    """Folgt Umleitungen nur zu https: ein Spiegel darf nicht auf http umlenken."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlparse(newurl).scheme != "https":
+            raise Fehler(f"Umleitung auf eine Adresse ohne https abgelehnt: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_NurHttps)
+
+
 class Repo:
     def __init__(self, src, tmp, system=None):
         self.src = src.rstrip("/")
-        self.remote = urllib.parse.urlparse(self.src).scheme in ("http", "https")
+        scheme = urllib.parse.urlparse(self.src).scheme
+        if scheme == "http":
+            raise Fehler(f"{self.src}: Repositories im Netz nur ueber https (Index und Pakete sind "
+                         "zwar signiert, aber ohne https sieht jeder mit, was installiert wird)")
+        if scheme not in ("", "https"):
+            raise Fehler(f"{self.src}: unbekannte Repository-Adresse (erlaubt: Verzeichnis oder https)")
+        self.remote = scheme == "https"
         self.tmp = tmp
         idx = self.fetch("index.toml")
         keys = system.keys if system else []
@@ -680,12 +702,23 @@ class Repo:
                 raise Fehler(f"im Repository fehlt {name}")
             return p
         out = os.path.join(self.tmp, "dl-" + name)
+        grenze = MAX_PAKET if name.endswith(".vpkg") else MAX_META
         try:
-            with urllib.request.urlopen(f"{self.src}/{urllib.parse.quote(name)}", timeout=60) as r, \
+            with _OPENER.open(f"{self.src}/{urllib.parse.quote(name)}", timeout=60) as r, \
                     open(out, "wb") as f:
-                shutil.copyfileobj(r, f)
+                n = 0
+                while True:
+                    block = r.read(1 << 20)
+                    if not block:
+                        break
+                    n += len(block)
+                    if n > grenze:
+                        raise Fehler(f"{name} ist groesser als erlaubt ({grenze >> 20} MiB)")
+                    f.write(block)
+        except Fehler as e:
+            raise Fehler(f"Download abgelehnt: {name}: {e}")
         except Exception as e:  # noqa: BLE001 - jede Netzwerkursache gleich melden
-            if optional:
+            if optional and isinstance(e, urllib.error.HTTPError) and e.code == 404:
                 return None
             raise Fehler(f"Download fehlgeschlagen: {name} ({e})")
         return out
@@ -981,13 +1014,44 @@ def ldconfig(system):
         subprocess.run(["chroot", system.root, "/usr/sbin/ldconfig"], check=False)
 
 
+SKRIPT_FEHLER = "skript-fehler"   # im Datenbankeintrag: post_install ist gescheitert
+
+
+def has_script_function(system, name, func):
+    inst = system.path(f"{DB}/installed/{name}/install")
+    if not os.path.isfile(inst):
+        return False
+    with open(inst, errors="replace") as f:
+        return any(z.startswith(f"{func} ()") for z in f)
+
+
 def run_install_script(system, name):
-    inst = f"/{DB}/installed/{name}/install"
-    if not os.path.isfile(system.path(inst.lstrip("/"))):
+    """Fuehrt post_install aus. Scheitert es, bleibt das Paket installiert, aber im
+    Datenbankeintrag steht ein Vermerk, den vpkg check meldet, bis ein neuer Lauf gelingt."""
+    vermerk = system.path(f"{DB}/installed/{name}/{SKRIPT_FEHLER}")
+    if not has_script_function(system, name, "post_install"):
         return
     info(f"   Install-Skript von {name}")
-    system.run_in_root(["/bin/bash", "-c", 'set -e; . "$1"; post_install', "vpkg", inst],
-                       f"Install-Skript von {name}")
+    inst = f"/{DB}/installed/{name}/install"
+    try:
+        system.run_in_root(["/bin/bash", "-c", 'set -e; . "$1"; post_install', "vpkg", inst],
+                           f"Install-Skript von {name}")
+    except Fehler as e:
+        with open(vermerk, "w") as f:
+            f.write(f"{e}\n")
+        raise
+    if os.path.exists(vermerk):
+        os.remove(vermerk)
+
+
+def run_pre_remove(system, name):
+    """Fuehrt pre_remove aus (vor dem Entfernen); scheitert es, wird nichts entfernt."""
+    if not has_script_function(system, name, "pre_remove"):
+        return
+    info(f"   Entfern-Skript von {name}")
+    inst = f"/{DB}/installed/{name}/install"
+    system.run_in_root(["/bin/bash", "-c", 'set -e; . "$1"; pre_remove', "vpkg", inst],
+                       f"Entfern-Skript (pre_remove) von {name}")
 
 
 def cmd_install(args, system, upgrade_only=False):
@@ -1034,8 +1098,10 @@ def cmd_install(args, system, upgrade_only=False):
                 try:
                     run_install_script(system, p.name)
                 except Fehler as e:
-                    raise Fehler(f"{e}\nDie Pakete sind installiert; das Install-Skript laesst sich "
-                                 "nicht zuruecknehmen (erneut ausfuehren: vpkg install PAKET)")
+                    raise Fehler(f"{e}\nDas Paket {p.name} ist installiert, sein Install-Skript aber "
+                                 "nicht durchgelaufen (vpkg check meldet das). Ein Install-Skript "
+                                 f"laesst sich nicht zuruecknehmen; erneut ausfuehren: vpkg rerun-script "
+                                 f"{p.name}")
         info(f"Fertig: {len(pkgs)} Paket(e).")
     return 0
 
@@ -1076,6 +1142,14 @@ def cmd_remove(args, system):
         if needed:
             raise Fehler("wird noch gebraucht:\n  " + "\n  ".join(sorted(needed))
                          + "\n(--no-deps entfernt trotzdem)")
+    if not args.no_scripts:
+        # Vor jeder Aenderung: scheitert ein pre_remove, bleibt alles, wie es ist.
+        for n in names:
+            try:
+                run_pre_remove(system, n)
+            except Fehler as e:
+                raise Fehler(f"{e}\nNichts entfernt (ohne Skript: vpkg remove --no-scripts {n})")
+
     def apply(txn):
         for n in names:
             info(f">> entferne {n} {fullver(system.installed[n])}")
@@ -1162,6 +1236,16 @@ def check_package(system, name, m):
     return errs, conf
 
 
+def cmd_rerun_script(args, system):
+    system.lock()
+    need(system, args.name)
+    if not has_script_function(system, args.name, "post_install"):
+        raise Fehler(f"{args.name} hat kein Install-Skript")
+    run_install_script(system, args.name)
+    info(f"Fertig: Install-Skript von {args.name} durchgelaufen.")
+    return 0
+
+
 def cmd_check(args, system):
     names = args.names or list(system.installed)
     errs, conf = [], []
@@ -1172,6 +1256,8 @@ def cmd_check(args, system):
         e, c = check_package(system, n, need(system, n))
         errs += e
         conf += c
+        if os.path.isfile(system.path(f"{DB}/installed/{n}/{SKRIPT_FEHLER}")):
+            errs.append(f"{n}: Install-Skript ist gescheitert (vpkg rerun-script {n})")
     have = provides_map(system.installed)
     for n in names:
         for d in system.installed[n].get("depends", []):
@@ -1245,6 +1331,7 @@ def main(argv=None):
     inst_opts(p)
     p = sub.add_parser("remove", help="Pakete entfernen")
     p.add_argument("--no-deps", action="store_true")
+    p.add_argument("--no-scripts", action="store_true", help="pre_remove nicht ausfuehren")
     p.add_argument("names", nargs="+")
     sub.add_parser("list", help="installierte Pakete")
     p = sub.add_parser("info", help="Angaben zu einem Paket")
@@ -1253,6 +1340,8 @@ def main(argv=None):
     p.add_argument("name")
     p = sub.add_parser("owner", help="zu welchem Paket gehoert eine Datei")
     p.add_argument("path")
+    p = sub.add_parser("rerun-script", help="post_install eines installierten Pakets erneut ausfuehren")
+    p.add_argument("name")
     p = sub.add_parser("check", help="installierte Dateien pruefen")
     p.add_argument("names", nargs="*")
     p = sub.add_parser("register", help="schon ausgepackte Pakete eintragen")
@@ -1281,7 +1370,8 @@ def main(argv=None):
             info("Kein unterbrochener Vorgang (mehr) vorhanden.")
             return 0
         return {"remove": cmd_remove, "list": cmd_list, "info": cmd_info, "files": cmd_files,
-                "owner": cmd_owner, "check": cmd_check, "register": cmd_register}[args.cmd](args, system)
+                "owner": cmd_owner, "check": cmd_check, "register": cmd_register,
+                "rerun-script": cmd_rerun_script}[args.cmd](args, system)
     except Fehler as e:
         print(f"vpkg: {e}", file=sys.stderr)
         return 1

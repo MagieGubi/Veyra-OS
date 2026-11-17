@@ -101,15 +101,17 @@ echo ">> Baue $pkgname $pkgver-$pkgrel"
 # gehoert keinem Paket allein und wuerde sonst zwischen Paketen kollidieren.
 rm -f "$pkgdir/usr/share/info/dir"
 
-# Install-Skript: definiert das Rezept post_install(), kommt sie als Datei "install" ins Paket.
-# VPKG fuehrt sie nach dem Auspacken im Zielsystem aus (dort mit chroot).
+# Install-Skript: definiert das Rezept post_install() oder pre_remove(), kommen sie als Datei
+# "install" ins Paket. VPKG fuehrt post_install nach dem Auspacken und pre_remove vor dem
+# Entfernen im Zielsystem aus (dort mit chroot).
 mkdir "$work/root"
 install_sha=""
-if declare -F post_install >/dev/null; then
+if declare -F post_install >/dev/null || declare -F pre_remove >/dev/null; then
   {
-    echo "# post_install aus dem Rezept von $pkgname $pkgver-$pkgrel"
+    echo "# Skripte aus dem Rezept von $pkgname $pkgver-$pkgrel"
     printf 'pkgname=%q pkgver=%q pkgrel=%q\n' "$pkgname" "$pkgver" "$pkgrel"
-    declare -f post_install
+    if declare -F post_install >/dev/null; then declare -f post_install; fi
+    if declare -F pre_remove >/dev/null; then declare -f pre_remove; fi
   } > "$work/root/install"
   install_sha=$(sha256sum "$work/root/install" | cut -d' ' -f1)
 fi

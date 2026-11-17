@@ -10,7 +10,7 @@ Stand: Core 0.1. Dieses Format erzeugt `vpkg-build` schon heute; das spätere VP
 ```
 manifest.toml     Metadaten und Dateiliste
 files/            Dateien, so wie sie ab / installiert werden
-install           nur wenn das Rezept post_install() hat (siehe unten)
+install           nur wenn das Rezept post_install() oder pre_remove() hat (siehe unten)
 ```
 
 Das Archiv ist reproduzierbar: Einträge sortiert, Besitzer 0:0, alle Zeitstempel =
@@ -104,6 +104,18 @@ ins Paket (Variablen `pkgname`, `pkgver`, `pkgrel` plus die Funktion) und trägt
 SHA-256 als `install_sha256` ins Manifest ein; `vpkg-verify` und VPKG lehnen ein Paket ab,
 dessen Skript nicht dazu passt. VPKG führt sie nach dem Installieren aus, bei `--root` per
 `chroot`. Beim Bau des Basissystems ruft `stage4/chroot/30-packages.sh` sie direkt auf.
+
+Scheitert `post_install`, bleibt das Paket installiert (die Dateien liegen schon, ein Skript
+lässt sich nicht zurücknehmen). VPKG legt dann im Datenbankeintrag die Datei
+`skript-fehler` an; `vpkg check` meldet das Paket als fehlerhaft, bis
+`vpkg rerun-script PAKET` gelingt (ab VPKG 0.5).
+
+## Optionale Funktion pre_remove() (ab VPKG 0.5)
+
+`pre_remove()` läuft vor dem Entfernen im Zielsystem, z. B. um einen Dienst zu stoppen.
+Sie steht in derselben Datei `install` wie `post_install` (geprüft über
+`install_sha256`). Scheitert sie, entfernt VPKG nichts; `vpkg remove --no-scripts`
+entfernt ohne Skript. Bei einer Aktualisierung läuft `pre_remove` nicht.
 
 ## Repository-Index
 

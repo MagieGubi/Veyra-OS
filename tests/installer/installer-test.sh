@@ -16,7 +16,7 @@ fail() { echo "nicht ok $n - $1" >&2; exit 1; }
 ok() { echo "ok $n - $1"; }
 
 n=$((n + 1))
-for f in veyra-install veyra_install.py veyra_fat.py; do
+for f in veyra-install veyra_install.py veyra_fat.py veyra-rootpruefung; do
   grep -q "$(sha256sum "$pkg/$f" | cut -d' ' -f1)" "$pkg/recipe.sh" \
     || fail "sha256sums in $pkg/recipe.sh passt nicht zu $f"
 done
@@ -50,7 +50,7 @@ ok "zu kleine EFI-Partition abgelehnt"
 # Kuenstliches Quellsystem (wie das Live-System): Konten, VPKG mit Selbsttest-Paket, Kernel
 q=$t/quelle
 mkdir -p "$q/usr/lib/systemd" "$q/usr/bin" "$q/etc/veyra" "$q/var/lib/vpkg" "$q/root" \
-  "$q/usr/lib/modules/6.18.56-veyra2" "$q/usr/lib/veyra/selftest" "$q/proc" "$q/sys" "$q/dev" "$q/run"
+  "$q/usr/lib/modules/6.18.56-veyra2" "$q/usr/lib/veyra/selftest" "$q/proc" "$q/sys" "$q/dev" "$q/run" "$q/home"
 mkdir -p "$q/tmp" && chmod 1777 "$q/tmp"
 printf '#!/bin/sh\n' > "$q/usr/lib/systemd/systemd"; chmod 755 "$q/usr/lib/systemd/systemd"
 cp "$here/packages/base/vpkg/vpkg" "$q/usr/bin/vpkg"
@@ -179,7 +179,79 @@ gibt /var/lib/vpkg/installed/veyra-selftest || fail "Selbsttest fehlt trotz --mi
 ok "--mit-selbsttest behaelt den Selbsttest; vpkg check und veyra-kontencheck liefen"
 
 n=$((n + 1))
+lies alt.img /etc/fstab | grep -qE '^PARTLABEL=veyra-efi +/efi +vfat +noauto' || fail "ESP fehlt in der fstab"
+gibt /efi || fail "Einhaengepunkt /efi fehlt"
+ok "fstab: EFI-Systempartition unter /efi (noauto), Root ueber PARTLABEL"
+
+# Konten schon bei der Installation (Antworten zeilenweise von stdin)
+n=$((n + 1)); platte konten.img
+printf '%s\n' 'wurzel-geheim-1' 'wurzel-geheim-1' anna 'anna-geheim-1' 'anna-geheim-1' \
+  | "$inst" installiere "$t/konten.img" --quelle "$q" --konten --bestaetigt "$t/konten.img" > "$t/i.log" 2>&1 \
+  || { cat "$t/i.log"; fail "Installation mit --konten schlug fehl"; }
+sh=$(lies konten.img /etc/shadow)
+# shellcheck disable=SC2016 # $6$ ist das woertliche Hash-Praefix
+grep -q '^root:\$6\$' <<<"$sh" || fail "root-Passwort nicht gesetzt: $(head -1 <<<"$sh")"
+# shellcheck disable=SC2016
+grep -q '^anna:\$6\$' <<<"$sh" || fail "Benutzer anna ohne Passwort-Hash"
+lies konten.img /etc/group | grep -qE '^wheel:x:97:anna$' || fail "anna nicht in wheel"
+gibt /etc/veyra/einrichtung-noetig && fail "Ersteinrichtung trotz --konten noch vorgemerkt"
+gibt /var/lib/veyra/einrichtung-fertig || fail "Ersteinrichtung nicht als fertig vermerkt"
+grep -q 'startet direkt zur Anmeldung' "$t/i.log" || fail "Abschlussmeldung fehlt"
+ok "--konten: root-Passwort und Benutzer (wheel) schon bei der Installation, keine Ersteinrichtung mehr"
+
+n=$((n + 1)); platte konten2.img
+if printf '%s\n' 'zu-kurz' | "$inst" installiere "$t/konten2.img" --quelle "$q" --konten --bestaetigt "$t/konten2.img" > "$t/i.log" 2>&1; then
+  fail "abgebrochene Kontoeingabe angenommen"
+fi
+grep -q 'Konten nicht eingerichtet' "$t/i.log" || { cat "$t/i.log"; fail "keine Meldung zur abgebrochenen Eingabe"; }
+sfdisk -d "$t/konten2.img" | grep -q 'name="veyra-unfertig"' || fail "Root-Partition nach Abbruch nicht als unfertig markiert"
+sfdisk -d "$t/konten2.img" | grep -q 'name="veyra-root"' && fail "abgebrochene Installation ist startbar (veyra-root)"
+ok "abgebrochene Kontoeingabe: Installation scheitert, Partition bleibt veyra-unfertig (startet nicht)"
+
+# Fehler beim Schreiben der Partitionstabelle: alte Tabelle zurueck, Platte unveraendert
+n=$((n + 1)); platte alt2.img
+printf 'label: gpt\nstart=1MiB, size=200MiB, type=L, name="daten"\n' | sfdisk -q "$t/alt2.img"
+sha=$(sha256sum < "$t/alt2.img")
+mkdir -p "$t/kaputt-bin"
+cat > "$t/kaputt-bin/sfdisk" <<'SF'
+#!/bin/bash
+# Probe-sfdisk: das Schreiben scheitert mitten drin (Anfang der Platte verdorben).
+for a in "$@"; do
+  if [ "$a" = --wipe ]; then
+    dev=${!#}; dd if=/dev/urandom of="$dev" bs=512 count=40 conv=notrunc status=none; exit 1
+  fi
+done
+exec /usr/sbin/sfdisk "$@"
+SF
+chmod 755 "$t/kaputt-bin/sfdisk"
+if PATH="$t/kaputt-bin:$PATH" "$inst" installiere "$t/alt2.img" --quelle "$q" --bestaetigt "$t/alt2.img" > "$t/i.log" 2>&1; then
+  fail "gescheiterte Partitionierung als Erfolg gemeldet"
+fi
+grep -q 'alte Partitionstabelle ist wiederhergestellt' "$t/i.log" || { cat "$t/i.log"; fail "keine Meldung zur Wiederherstellung"; }
+[ "$(sha256sum < "$t/alt2.img")" = "$sha" ] || fail "Platte nach gescheiterter Partitionierung veraendert"
+ok "Fehler beim Partitionieren: alte Partitionstabelle wiederhergestellt, Platte unveraendert"
+
+n=$((n + 1))
 "$inst" pruefe "$t/st.img" --quelle "$q" > "$t/p.log" 2>&1 || true
 grep -q 'Veyra OS' "$t/p.log" || { cat "$t/p.log"; fail "installiertes Veyra nicht erkannt"; }
 ok "pruefe erkennt ein installiertes Veyra"
+n=$((n + 1))
+mkdir -p "$t/rp-bin"
+cat > "$t/rp-bin/lsblk" <<'LS'
+#!/bin/bash
+printf '/dev/vda\n/dev/vda1 veyra-efi\n/dev/vda2 veyra-root\n'
+[ -n "${ZWEI:-}" ] && printf '/dev/sdb2 veyra-root\n'
+exit 0
+LS
+printf '#!/bin/bash\necho /dev/vda2\n' > "$t/rp-bin/findmnt"
+chmod 755 "$t/rp-bin/lsblk" "$t/rp-bin/findmnt"
+rp() { PATH="$t/rp-bin:$PATH" VEYRA_ISSUE_DIR="$t/issue.d" bash "$pkg/veyra-rootpruefung"; }
+rp 2> "$t/rp.log" || fail "Startpruefung scheitert bei einer Platte"
+[ ! -s "$t/rp.log" ] && [ ! -e "$t/issue.d/50-veyra-root.issue" ] || fail "Warnung bei nur einer veyra-root-Partition"
+ZWEI=1 rp 2> "$t/rp.log" || fail "Startpruefung scheitert bei zwei Platten"
+grep -q 'WARNUNG: 2 Partitionen heissen veyra-root (/dev/vda2 /dev/sdb2). Gestartet ist /dev/vda2' "$t/rp.log" \
+  || fail "falsche Warnung: $(cat "$t/rp.log")"
+grep -q 'WARNUNG: 2 Partitionen' "$t/issue.d/50-veyra-root.issue" || fail "Warnung fehlt vor der Anmeldung"
+rp 2> "$t/rp.log" && [ ! -e "$t/issue.d/50-veyra-root.issue" ] || fail "Warnung bleibt nach Abziehen der zweiten Platte"
+ok "Startpruefung warnt bei zwei veyra-root-Partitionen (Konsole und Anmeldung), sonst still"
 echo "Alle $n Installer-Tests bestanden."

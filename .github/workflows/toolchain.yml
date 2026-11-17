@@ -22,13 +22,14 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh packages/base/veyra-konten/veyra-*
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
         run: |
           python3 -m py_compile packages/base/vpkg/vpkg
-          bash tests/vpkg/vpkg-test.sh
+          build/scripts/fetch-extra.sh "$RUNNER_TEMP/quellen"
+          VEYRA_QUELLEN=$RUNNER_TEMP/quellen bash tests/vpkg/vpkg-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
         run: bash tests/boot/diagnose-test.sh
       - name: Konten testen (Ersteinrichtung, Kontenpruefung)
@@ -57,7 +58,7 @@ jobs:
 
       - name: Fertige Toolchain aus dem Cache holen
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out
           key: toolchain-stage2-${{ hashFiles('toolchain/**', 'build/container/Dockerfile', 'build/scripts/ci-toolchain.sh') }}
@@ -80,7 +81,7 @@ jobs:
         run: sudo chown -R "$(id -u):$(id -g)" out && cd out && sha256sum veyra-toolchain-stage2.tar.zst | tee SHA256SUMS
 
       - name: Ergebnis hochladen
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: toolchain-stage2
           path: |
@@ -103,14 +104,14 @@ jobs:
 
       - name: Fertige Stufe 3 aus dem Cache holen
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out
           key: temptools-stage3-${{ hashFiles('toolchain/**', 'temptools/**', 'build/container/Dockerfile', 'build/scripts/ci-toolchain.sh', 'build/scripts/ci-temptools.sh') }}
 
       - name: Toolchain aus Stufe 2 holen
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: toolchain-stage2
           path: in
@@ -133,7 +134,7 @@ jobs:
         run: sudo chown -R "$(id -u):$(id -g)" out && cd out && sha256sum veyra-temptools-stage3.tar.zst | tee SHA256SUMS
 
       - name: Ergebnis hochladen
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: temptools-stage3
           path: |
@@ -159,14 +160,14 @@ jobs:
 
       - name: Fertigen Kernel aus dem Cache holen
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out
           key: kernel-${{ matrix.build }}-${{ hashFiles('toolchain/**', 'kernel/**', 'build/container/Dockerfile', 'build/scripts/ci-toolchain.sh', 'build/scripts/ci-kernel.sh') }}
 
       - name: Toolchain aus Stufe 2 holen
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: toolchain-stage2
           path: in
@@ -183,7 +184,7 @@ jobs:
 
       - name: Ergebnis hochladen
         run: sudo chown -R "$(id -u):$(id -g)" out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: kernel-${{ matrix.build }}
           path: out
@@ -197,11 +198,11 @@ jobs:
     needs: kernel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: kernel-a
           path: a
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: kernel-b
           path: b
@@ -227,14 +228,14 @@ jobs:
 
       - name: Fertige Stufe 4a aus dem Cache holen
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out
           key: stage4a-${{ steps.key.outputs.k }}
 
       - name: Stufe 3 holen
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: temptools-stage3
           path: in
@@ -257,7 +258,7 @@ jobs:
         run: sudo chown -R "$(id -u):$(id -g)" out && cd out && sha256sum veyra-stage4a.tar.zst | tee SHA256SUMS
 
       - name: Ergebnis hochladen
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: stage4a
           path: |
@@ -284,14 +285,14 @@ jobs:
 
       - name: Fertigen Teil 1 aus dem Cache holen
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out
           key: stage4b-1-${{ steps.key.outputs.k }}
 
       - name: Vorige Stufe holen
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: stage4a
           path: in
@@ -313,7 +314,7 @@ jobs:
 
       - name: Ergebnis hochladen
         run: sudo chown -R "$(id -u):$(id -g)" out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: stage4b-1
           path: |
@@ -322,7 +323,7 @@ jobs:
             out/stage4-sources.lock
             out/build-stage4b-1.log
           retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: pakete-4b-1
           path: out/packages
@@ -345,14 +346,14 @@ jobs:
 
       - name: Fertigen Teil 2 aus dem Cache holen
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out
           key: stage4b-2-${{ steps.key.outputs.k }}
 
       - name: Vorige Stufe holen
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: stage4b-1
           path: in
@@ -374,7 +375,7 @@ jobs:
 
       - name: Ergebnis hochladen
         run: sudo chown -R "$(id -u):$(id -g)" out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: stage4b-2
           path: |
@@ -383,7 +384,7 @@ jobs:
             out/stage4-sources.lock
             out/build-stage4b-2.log
           retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: pakete-4b-2
           path: out/packages
@@ -406,14 +407,14 @@ jobs:
 
       - name: Fertigen Teil 3 aus dem Cache holen
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out
           key: stage4b-3-${{ steps.key.outputs.k }}
 
       - name: Vorige Stufe holen
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: stage4b-2
           path: in
@@ -435,7 +436,7 @@ jobs:
 
       - name: Ergebnis hochladen
         run: sudo chown -R "$(id -u):$(id -g)" out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: stage4b-3
           path: |
@@ -444,7 +445,7 @@ jobs:
             out/stage4-sources.lock
             out/build-stage4b-3.log
           retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: pakete-4b-3
           path: out/packages
@@ -470,26 +471,27 @@ jobs:
           sudo udevadm trigger --name-match=kvm || true
 
       - name: Basissystem holen
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: stage4b-3
           path: sys
       - name: Kernel holen
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: kernel-a
           path: k
 
       - name: Basispakete holen (fuer die VPKG-Datenbank)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: pakete-4b-*
           path: basis
 
-      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, vpkg, Selbsttest)
+      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, veyra-zertifikate, vpkg, Selbsttest)
         run: |
-          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/vpkg packages/test/veyra-selftest; do
-            build/scripts/vpkg-build --srcdir "$PWD" --outdir extra "$r"
+          build/scripts/fetch-extra.sh "$RUNNER_TEMP/quellen"
+          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/veyra-zertifikate packages/base/vpkg packages/test/veyra-selftest; do
+            build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir extra "$r"
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
 
@@ -520,7 +522,7 @@ jobs:
         if: always()
         run: |
           if [ -f veyra-core-0.1.img ]; then zstd -q -T0 -10 veyra-core-0.1.img -o veyra-core-0.1.img.zst; sha256sum veyra-core-0.1.img* | tee SHA256SUMS; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: veyra-core-0.1
@@ -538,7 +540,7 @@ jobs:
           rm -f veyra-core-0.1.img.zst
           qemu-img convert -f raw -O vdi veyra-core-0.1.img veyra-core-0.1.vdi
           sha256sum veyra-core-0.1.vdi | tee SHA256SUMS-vdi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: success()
         with:
           name: veyra-virtualbox
@@ -568,18 +570,20 @@ jobs:
           sudo umount /mnt/quelle
           sudo losetup -d "$loop"
           sfdisk -l installiert.img | tee -a installer.log
-      - name: Boot-Test des installierten Systems und Selbsttest
+      # Wie ein Mensch: Ersteinrichtung an Konsole 1 eintippen, als neuer Benutzer anmelden,
+      # su, herunterfahren, von derselben Platte neu starten, als root anmelden.
+      - name: Installiertes System starten, einrichten, anmelden, neu starten
         if: success()
         run: |
-          SELFTEST=1 image/boot-test.sh installiert.img installiert-boot.log 600
+          python3 image/install-test.py installiert.img installiert-logs
           rm -f installiert.img
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: veyra-installer-test
           path: |
             installer.log
-            installiert-boot.log
+            installiert-logs
           retention-days: 7
           if-no-files-found: ignore
 
@@ -607,7 +611,7 @@ jobs:
           fi
           (cd repo && sha256sum ./*.vpkg > SHA256SUMS)
           echo "Pakete: $(ls repo/*.vpkg | wc -l), signiert: $(ls repo/*.vpkg.sig 2>/dev/null | wc -l), Index signiert: $([ -f repo/index.toml.sig ] && echo ja || echo nein)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: success()
         with:
           name: veyra-repo
@@ -630,7 +634,7 @@ jobs:
         run: |
           zstd -q -T0 -10 --rm veyra-core-0.1-test.img -o veyra-core-0.1-test.img.zst
           sha256sum veyra-core-0.1-test.img.zst | tee SHA256SUMS-test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: success()
         with:
           name: veyra-core-0.1-test
@@ -658,12 +662,12 @@ jobs:
           sudo udevadm trigger --name-match=kvm || true
 
       - name: Abbild holen
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: veyra-core-0.1
           path: img
       - name: Kernel holen
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: kernel-a
           path: k
@@ -679,7 +683,7 @@ jobs:
       - name: Boot-Test von CD (UEFI) und Selbsttest
         run: SELFTEST=1 MEDIUM=cdrom image/boot-test.sh veyra-core-0.1-live.iso boot-live.log 600
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: veyra-live-iso

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests fuer VPKG 0.4 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
+# Tests fuer VPKG 0.5 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
 # Braucht python3 (3.11+), zstd, openssl. Laeuft ohne root-Rechte.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -352,6 +352,48 @@ vs install --allow-downgrade "$P/app-1.0-1-x86_64.vpkg" >/dev/null || fail "--al
 vs list | grep -qx 'app 1.0-1' || fail "Downgrade mit --allow-downgrade nicht ausgefuehrt"
 ok "aeltere Version wird nur mit --allow-downgrade installiert"
 
+# HTTPS-Quelle (VPKG 0.5): Zertifikat wird geprueft, http und Umleitung auf http abgelehnt.
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$t/tls.key" -out "$t/tls.crt" -days 2 \
+  -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1 2>/dev/null
+mkrepo "$t/https/repo" 400 liba-1.0-1-x86_64.vpkg app-2.0-1-x86_64.vpkg
+python3 - "$t/https" "$t/tls.crt" "$t/tls.key" "$t/port" <<'PYS' &
+import functools, http.server, ssl, sys
+wurzel, crt, key, portdatei = sys.argv[1:]
+class H(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith("/weiter/"):
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:9" + self.path[len("/weiter"):])
+            self.end_headers()
+            return
+        super().do_GET()
+    def log_message(self, *a):
+        pass
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(H, directory=wurzel))
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(crt, key)
+srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+open(portdatei + ".neu", "w").write(str(srv.server_address[1]))
+import os; os.rename(portdatei + ".neu", portdatei)
+srv.serve_forever()
+PYS
+https_pid=$!
+trap 'kill "$https_pid" 2>/dev/null; rm -rf "$t"' EXIT
+for _ in $(seq 50); do [ -s "$t/port" ] && break; sleep 0.1; done
+port=$(cat "$t/port") || fail "HTTPS-Testserver startet nicht"
+abgelehnt 'Download fehlgeschlagen' vs upgrade --repo "https://localhost:$port/repo"
+vs list | grep -qx 'app 1.0-1' || fail "Version trotz unbekanntem Zertifikat veraendert"
+SSL_CERT_FILE=$t/tls.crt vs upgrade --repo "https://localhost:$port/repo" >"$t/out" 2>&1 \
+  || fail "upgrade ueber https: $(cat "$t/out")"
+vs list | grep -qx 'app 2.0-1' || fail "upgrade ueber https nicht ausgefuehrt"
+abgelehnt 'nur ueber https' vs upgrade --repo "http://localhost:$port/repo"
+abgelehnt 'unbekannte Repository-Adresse' vs upgrade --repo "ftp://localhost/repo"
+SSL_CERT_FILE=$t/tls.crt abgelehnt 'Umleitung auf eine Adresse ohne https' \
+  vs install --repo "https://localhost:$port/weiter/repo" liba
+kill "$https_pid" 2>/dev/null; wait "$https_pid" 2>/dev/null || true
+trap 'rm -rf "$t"' EXIT
+ok "HTTPS-Quelle: Zertifikat geprueft, http, fremde Schemata und Umleitung auf http abgelehnt"
+
 # Versionsbedingungen (VPKG 0.4): eigenes Zielsystem ohne Schluessel.
 vr=$t/vr
 mkdir -p "$vr/var/lib/vpkg/installed"
@@ -405,11 +447,66 @@ if vv check laufzeit > "$t/out" 2>&1; then fail "fehlendes Verzeichnis ausserhal
 grep -q 'laufzeit: Verzeichnis fehlt: /var/lib/laufzeit' "$t/out" || fail "check-Meldung: $(cat "$t/out")"
 ok "check: fehlende Verzeichnisse unter /run (tmpfs im laufenden System) sind kein Fehler, sonst schon"
 
+# Install- und Entfern-Skripte (P1-6). Als root laufen sie per chroot in einem Zielsystem,
+# das nur bash enthaelt (die Skripte nutzen nur Builtins); ohne root scheitert jedes Skript
+# mit "nur als root", was dieselben Fehlerpfade prueft.
+skr=$t/skriptroot
+mkdir -p "$skr/var/lib/vpkg/installed" "$skr/etc"
+sv() { python3 "$here/packages/base/vpkg/vpkg" --root "$skr" "$@"; }
+alsroot=0
+if [ "$(id -u)" = 0 ]; then
+  alsroot=1
+  for f in /bin/bash $(ldd /bin/bash | grep -o '/[^ ]*'); do
+    install -D "$(readlink -f "$f")" "$skr$f"
+  done
+  [ -e "$skr/usr/bin/bash" ] || { mkdir -p "$skr/usr/bin"; cp "$skr/bin/bash" "$skr/usr/bin/bash"; }
+fi
+mkdir -p "$t/r/skriptfehl" "$t/r/entfern"
+cat > "$t/r/skriptfehl/recipe.sh" <<'RCP'
+pkgname=skriptfehl pkgver=1 license=MIT
+package() { install -d "$pkgdir/usr/share/skriptfehl"; echo x > "$pkgdir/usr/share/skriptfehl/x"; }
+post_install() { [ -e /etc/schalter ]; }
+RCP
+cat > "$t/r/entfern/recipe.sh" <<'RCP'
+pkgname=entfern pkgver=1 license=MIT
+package() { install -d "$pkgdir/usr/share/entfern"; echo x > "$pkgdir/usr/share/entfern/x"; }
+pre_remove() { [ -e /etc/darf-weg ]; }
+RCP
+"$build" --srcdir "$t" --outdir "$P" "$t/r/skriptfehl" >/dev/null
+"$build" --srcdir "$t" --outdir "$P" "$t/r/entfern" >/dev/null
+grep -q '^pre_remove ()' <(zstd -q -dc "$P/entfern-1-1-x86_64.vpkg" | tar -xOf - install) \
+  || fail "pre_remove nicht im Paket"
+
+abgelehnt 'nicht durchgelaufen (vpkg check meldet das)' sv install "$P/skriptfehl-1-1-x86_64.vpkg"
+[ -f "$skr/usr/share/skriptfehl/x" ] || fail "Dateien trotz gescheitertem Skript nicht installiert"
+abgelehnt 'skriptfehl: Install-Skript ist gescheitert' sv check skriptfehl
+if [ $alsroot = 1 ]; then
+  touch "$skr/etc/schalter"
+  sv rerun-script skriptfehl >/dev/null || fail "rerun-script nach Behebung gescheitert"
+  sv check skriptfehl >/dev/null || fail "check meldet behobenes Skript weiter"
+fi
+ok "gescheitertes post_install: Paket bleibt installiert, check meldet es, rerun-script behebt es"
+
+sv install --no-scripts "$P/entfern-1-1-x86_64.vpkg" >/dev/null || fail "entfern nicht installiert"
+abgelehnt 'Nichts entfernt' sv remove entfern
+{ [ -f "$skr/usr/share/entfern/x" ] && sv list | grep -q '^entfern '; } || fail "nach gescheitertem pre_remove fehlt etwas"
+if [ $alsroot = 1 ]; then
+  touch "$skr/etc/darf-weg"
+  sv remove entfern >/dev/null || fail "remove mit gelingendem pre_remove gescheitert"
+else
+  sv remove --no-scripts entfern >/dev/null || fail "remove --no-scripts gescheitert"
+fi
+[ ! -e "$skr/usr/share/entfern/x" ] || fail "entfern nicht entfernt"
+ok "pre_remove: scheitert es, wird nichts entfernt; danach (oder mit --no-scripts) wird entfernt"
+
 # Die eigenen Pakete (wie im CI-Job "image" gebaut) muessen die Manifestpruefung bestehen;
 # vpkg selbst bringt z. B. die leeren Verzeichnisse der Paketdatenbank mit.
+# Netz-Quellen (veyra-zertifikate) vorher mit build/scripts/fetch-extra.sh nach
+# $VEYRA_QUELLEN laden; ohne die Variable bricht der Test ab, statt Pakete auszulassen.
+[ -n "${VEYRA_QUELLEN:-}" ] || fail "VEYRA_QUELLEN fehlt (build/scripts/fetch-extra.sh VERZ; VEYRA_QUELLEN=VERZ)"
 mkdir "$t/eigene"
 for r in "$here"/packages/base/* "$here"/packages/test/*; do
-  "$build" --srcdir "$here" --outdir "$t/eigene" "$r" >/dev/null || fail "Bau von $r"
+  "$build" --srcdir "$VEYRA_QUELLEN" --outdir "$t/eigene" "$r" >/dev/null || fail "Bau von $r"
 done
 python3 "$here/packages/base/vpkg/vpkg" index "$t/eigene" >"$t/out" 2>&1 \
   || fail "eigene Pakete abgelehnt: $(cat "$t/out")"

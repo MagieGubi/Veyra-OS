@@ -367,7 +367,10 @@ def richte_ein(root, hostname="veyra", melde=print):
     etc = os.path.join(root, "etc")
     with open(os.path.join(etc, "fstab"), "w") as f:
         f.write("# Dateisystem          Ziel  Typ   Optionen  dump  fsck\n"
-                f"PARTLABEL={ROOT_NAME}   /     ext4  defaults  1     1\n")
+                f"PARTLABEL={ROOT_NAME}   /     ext4  defaults  1     1\n"
+                "# EFI-Systempartition (Kernel als BOOTX64.EFI); nur bei Bedarf einhaengen:\n"
+                f"PARTLABEL={ESP_NAME}    /efi  vfat  noauto,nofail,umask=0077  0  2\n")
+    os.makedirs(os.path.join(root, "efi"), mode=0o700, exist_ok=True)
     with open(os.path.join(etc, "hostname"), "w") as f:
         f.write(hostname + "\n")
     # Leere machine-id: das System erzeugt beim ersten Start seine eigene.
@@ -416,10 +419,38 @@ def entferne_selbsttest(root, vpkg, melde=print):
 
 # ---------------------------------------------------------------- Installation
 
-def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=print):
+def _sichere_tabelle(ziel, groesse):
+    """Liest Anfang und Ende des Ziels (je 1 MiB: MBR, GPT und Sicherungs-GPT)."""
+    fd = os.open(ziel, os.O_RDONLY)
+    try:
+        anfang = os.pread(fd, MIB, 0)
+        ende = os.pread(fd, MIB, groesse - MIB)
+    finally:
+        os.close(fd)
+    return anfang, ende
+
+
+def _stelle_tabelle_her(ziel, groesse, sicherung):
+    anfang, ende = sicherung
+    fd = os.open(ziel, os.O_WRONLY)
+    try:
+        os.pwrite(fd, anfang, 0)
+        os.pwrite(fd, ende, groesse - MIB)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    subprocess.run(["blockdev", "--rereadpt", ziel], capture_output=True)
+
+
+def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=print, konten=None):
     """Installiert QUELLE auf ZIEL. Die Bestaetigung muss die Oberflaeche vorher einholen.
-    Ein Abbruch nach dem Schreiben der Partitionstabelle hinterlaesst ein unvollstaendiges
-    Ziel (ohne Partition veyra-root, wenn es vor dem Kopieren abbricht)."""
+
+    KONTEN: None (Ersteinrichtung beim ersten Start) oder eine Funktion konten(root), die
+    im fertig kopierten System root-Passwort und Benutzer einrichtet.
+
+    Bei einem Fehler vor dem Schreiben der ersten Partition stellt der Installer die alte
+    Partitionstabelle wieder her (das Ziel ist dann unveraendert). Danach ist das nicht mehr
+    moeglich: die Root-Partition heisst bis zum Schluss veyra-unfertig und startet nicht."""
     if os.geteuid() != 0:
         raise InstallFehler("der Installer braucht root")
     kernel = pruefe_quelle(quelle)
@@ -429,16 +460,22 @@ def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=prin
     teile = plan(info)
     esp, rootp = teile
 
+    sicherung = _sichere_tabelle(ziel, info["groesse"])
     melde(f"Partitionstabelle (GPT) auf {ziel} schreiben")
     # Root zuerst unter anderem Namen anlegen: bricht die Installation ab, findet der
     # Kernel kein halbfertiges veyra-root.
     skript = ("label: gpt\n"
               f"start={esp['start'] // 512}, size={esp['groesse'] // 512}, type={ESP_TYP}, name=\"{ESP_NAME}\"\n"
               f"start={rootp['start'] // 512}, size={rootp['groesse'] // 512}, type=L, name=\"veyra-unfertig\"\n")
-    lauf(["sfdisk", "-q", "--wipe", "always", "--wipe-partitions", "always", ziel], skript)
-    _, neu = _partitionen(ziel)
-    if len(neu) != 2 or neu[0]["start"] != esp["start"] or neu[1]["start"] != rootp["start"]:
-        raise InstallFehler("Partitionstabelle nach dem Schreiben nicht wie geplant")
+    try:
+        lauf(["sfdisk", "-q", "--wipe", "always", ziel], skript)
+        _, neu = _partitionen(ziel)
+        if len(neu) != 2 or neu[0]["start"] != esp["start"] or neu[1]["start"] != rootp["start"]:
+            raise InstallFehler("Partitionstabelle nach dem Schreiben nicht wie geplant")
+    except (InstallFehler, OSError) as e:
+        _stelle_tabelle_her(ziel, info["groesse"], sicherung)
+        raise InstallFehler(f"{e}\nDie alte Partitionstabelle ist wiederhergestellt, "
+                            "auf dem Ziel wurde nichts veraendert.") from e
 
     melde(f"EFI-Systempartition (FAT32) mit Kernel {os.path.basename(os.path.dirname(kernel))}")
     with open(kernel, "rb") as f:
@@ -457,6 +494,9 @@ def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=prin
         lauf(["cp", "-a", "--one-file-system", os.path.join(quelle, "."), mnt])
         melde("System einrichten (root gesperrt bis zur Ersteinrichtung)")
         richte_ein(mnt, hostname, melde)
+        if konten is not None:
+            melde("Konten einrichten (root-Passwort, Benutzer)")
+            konten(mnt)
         vpkg = os.path.join(mnt, "usr/bin/vpkg")
         if not mit_selbsttest:
             entferne_selbsttest(mnt, vpkg, melde)

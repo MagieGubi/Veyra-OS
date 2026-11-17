@@ -1,6 +1,6 @@
 # Veyra installieren (veyra-install)
 
-Stand: 16.11.2026, Installer 0.1. **Bisher nur auf virtuellen Platten geprüft**
+Stand: 16.11.2026, Installer 0.3. **Bisher nur auf virtuellen Platten geprüft**
 (Tests in `tests/installer/installer-test.sh`; im CI Installation auf eine leere
 8-GiB-Platte und Boot mit Selbsttest in QEMU, zuerst grün in Lauf [43856635308](https://github.com/MagieGubi/Veyra-OS/actions/runs/43856635308)).
 Auf einem echten Datenträger ist der Installer noch nie gelaufen.
@@ -19,8 +19,10 @@ System ein:
 Wie das Abbild startet das installierte System ohne Bootloader: die UEFI-Firmware startet
 den Kernel direkt, der Kernel findet sein Root über `root=PARTLABEL=veyra-root`.
 
-Im installierten System ist root gesperrt. Beim ersten Start fragt die Ersteinrichtung an
-Konsole 1 nach dem root-Passwort und legt auf Wunsch einen Benutzer in der Gruppe `wheel`
+Im installierten System ist root gesperrt. Der Installer fragt an der Konsole, ob
+root-Passwort und Benutzer gleich festgelegt werden sollen (dieselbe Ersteinrichtung wie
+beim ersten Start, nur im neuen System). Sonst fragt die Ersteinrichtung beim ersten Start
+an Konsole 1 nach dem root-Passwort und legt auf Wunsch einen Benutzer in der Gruppe `wheel`
 an (nur `wheel` darf `su`). Der Selbsttest wird entfernt (`vpkg remove veyra-selftest`).
 Zum Schluss prüft der Installer das Ergebnis mit `vpkg check` und `veyra-kontencheck`.
 
@@ -37,7 +39,9 @@ Gerätename (z. B. `/dev/sdX`) eingetippt wurde. Er zeigt vorher, was auf dem Zi
 (Windows, Linux, Veyra, verschlüsselte Partitionen, Daten).
 
 Optionen für `installiere`: `--hostname NAME`, `--quelle VERZ` (anderes Quellsystem),
-`--mit-selbsttest` (Selbsttest behalten, für Tests in der VM), `--bestaetigt ZIEL`
+`--mit-selbsttest` (Selbsttest behalten, für Tests in der VM), `--konten` (Konten
+jetzt festlegen, ohne Rückfrage; liest auch zeilenweise von stdin), `--konten-spaeter`
+(Ersteinrichtung beim ersten Start), `--bestaetigt ZIEL`
 (Bestätigung ohne Rückfrage, nur für automatische Tests auf virtuellen Platten; muss
 genau dem Ziel entsprechen).
 
@@ -55,9 +59,20 @@ genau dem Ziel entsprechen).
   könnte sonst das falsche System starten).
 - Das Quellsystem ist unvollständig (kein systemd, VPKG, Ersteinrichtung oder Kernel).
 
-Bricht die Installation nach dem Schreiben der Partitionstabelle ab, heißt die
+Scheitert das Schreiben der Partitionstabelle selbst, stellt der Installer die alte
+wieder her (er sichert vorher das erste und letzte MiB des Ziels); auf dem Ziel ist dann
+nichts verändert. Bricht die Installation später ab, heißt die
 Root-Partition noch `veyra-unfertig`; erst ganz am Ende wird sie in `veyra-root`
 umbenannt. Ein halb installiertes System startet also nicht versehentlich.
+
+## Im installierten System
+
+- Die EFI-Partition steht in der fstab unter `/efi` (`noauto`, nur root): `mount /efi`.
+- Beim Start prüft `veyra-rootpruefung.service`, ob mehr als eine Partition `veyra-root`
+  heißt (zum Beispiel installierte Platte und Veyra-USB-Stick). Dann steht eine Warnung im
+  Journal, auf der Konsole und über der Anmeldeaufforderung, mit dem tatsächlich
+  gestarteten Gerät. Welcher Datenträger startet, ist in dem Fall nicht festgelegt; das
+  behebt erst ein Bootloader mit Einträgen per `PARTUUID` (geplant für 0.6).
 
 ## Aufbau
 
@@ -67,6 +82,9 @@ umbenannt. Ein halb installiertes System startet also nicht versehentlich.
   EFI-Systempartition. Das Basissystem hat kein `mkfs.fat`; das Modul legt das
   Dateisystem mit den nötigen Dateien direkt an (nur kurze Namen, geprüft mit `fsck.fat`).
 - `packages/base/veyra-installer/veyra-install`: Kommandozeile mit Rückfrage.
+- `packages/base/veyra-installer/veyra-rootpruefung`: Warnung bei zwei `veyra-root`.
+- `image/install-test.py`: startet die installierte Platte in QEMU, tippt die
+  Ersteinrichtung an Konsole 1 ein, meldet sich an, prüft `su` und startet neu (CI).
 
 Partitionen spricht der Installer über ihren Versatz an (Loop-Gerät mit `--offset`),
 nicht über `/dev/sdX1`; das funktioniert gleich für echte Datenträger und Abbild-Dateien.

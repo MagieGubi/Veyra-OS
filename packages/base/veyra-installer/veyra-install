@@ -13,12 +13,17 @@ Optionen fuer installiere:
   --quelle VERZ        Quellsystem (Standard: /run/veyra-live/sfs, das Live-System)
   --hostname NAME      Rechnername (Standard: veyra)
   --mit-selbsttest     Selbsttest im installierten System behalten (fuer Tests in der VM)
+  --konten             root-Passwort und Benutzer schon bei der Installation festlegen
+                       (fragt an der Konsole oder liest zeilenweise von stdin)
+  --konten-spaeter     nicht fragen; die Ersteinrichtung laeuft beim ersten Start
+                       (ohne beide Optionen fragt der Installer an der Konsole nach)
   --bestaetigt ZIEL    Bestaetigung ohne Rueckfrage (nur fuer automatische Tests auf
                        virtuellen Platten); muss genau ZIEL entsprechen
 """
 import argparse
 import os
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, "/usr/lib/veyra/installer")
@@ -101,10 +106,28 @@ def cmd_installiere(args):
         if antwort != args.ziel:
             print("Nicht bestaetigt: Abbruch, nichts geaendert.")
             return 1
+    jetzt = args.konten
+    if not jetzt and not args.konten_spaeter and args.bestaetigt is None and sys.stdin.isatty():
+        try:
+            a = input("root-Passwort und Benutzer jetzt festlegen? [J/n] ").strip().lower()
+        except EOFError:
+            a = "n"
+        jetzt = a in ("", "j", "ja", "y", "yes")
+
+    def konten(root):
+        # Dieselbe Ersteinrichtung wie beim ersten Start, nur im neuen System (--root).
+        r = subprocess.run(["bash", os.path.join(root, "usr/bin/veyra-einrichtung"), "--root", root])
+        if r.returncode != 0:
+            raise vi.InstallFehler("Konten nicht eingerichtet (Ersteinrichtung abgebrochen)")
+
     vi.installiere(args.ziel, args.quelle, mit_selbsttest=args.mit_selbsttest,
-                   hostname=args.hostname, melde=lambda s: print(f">> {s}", flush=True))
-    print(f"Installation fertig. Beim naechsten Start von {args.ziel} (UEFI, Secure Boot aus) "
-          "fragt Veyra an Konsole 1 nach dem root-Passwort.")
+                   hostname=args.hostname, melde=lambda s: print(f">> {s}", flush=True),
+                   konten=konten if jetzt else None)
+    if jetzt:
+        print(f"Installation fertig. {args.ziel} startet direkt zur Anmeldung (UEFI, Secure Boot aus).")
+    else:
+        print(f"Installation fertig. Beim naechsten Start von {args.ziel} (UEFI, Secure Boot aus) "
+              "fragt Veyra an Konsole 1 nach dem root-Passwort.")
     return 0
 
 
@@ -120,6 +143,9 @@ def main():
         if name == "installiere":
             p.add_argument("--hostname", default="veyra")
             p.add_argument("--mit-selbsttest", action="store_true")
+            g = p.add_mutually_exclusive_group()
+            g.add_argument("--konten", action="store_true")
+            g.add_argument("--konten-spaeter", action="store_true")
             p.add_argument("--bestaetigt")
     args = ap.parse_args()
     try:
