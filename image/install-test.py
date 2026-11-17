@@ -149,15 +149,25 @@ class VM:
         self.sende(cmd + "\r")
         return self.erwarte(muster, zeit)
 
-    def ende(self, zeit=90):
-        try:
-            self.p.wait(zeit)
-        except subprocess.TimeoutExpired:
+    def ende(self, zeit=240, erlaubt=60):
+        """Wartet aufs Ausschalten. Dauert es laenger als ERLAUBT Sekunden, ist das ein
+        Fehler; gewartet wird trotzdem bis ZEIT, damit systemd im Log zeigt, welcher
+        Dienst haengt ("A stop job is running for ...")."""
+        start = time.time()
+        while self.p.poll() is None and time.time() - start < zeit:
+            self._lies(0.5)
+        dauer = time.time() - start
+        if self.p.poll() is None:
             self.p.kill()
             raise Fehler(f"VM hat sich nicht innerhalb {zeit}s ausgeschaltet")
         self._lies(0.5)
         if "reboot: Power down" not in self.buf:
             raise Fehler("kein sauberes Ausschalten (reboot: Power down fehlt)")
+        haengt = sorted(set(re.findall(r"A stop job is running for ([^(\r\n]+)", self.buf)))
+        if dauer > erlaubt:
+            raise Fehler(f"Herunterfahren dauerte {dauer:.0f}s (erlaubt {erlaubt}s); "
+                         f"haengende Dienste: {', '.join(h.strip() for h in haengt) or 'keine gemeldet'}")
+        return dauer
 
     def stopp(self):
         if self.p.poll() is None:
@@ -207,10 +217,12 @@ def start1(platte, logdir, tmp):
         vm.sende(ROOT_PW + "\r")
         vm.erwarte(r"UID-0-10", 30)
         ok("su mit dem root-Passwort ergibt UID 0")
+        # Fuer die Fehlersuche, falls das Herunterfahren haengt: wer laeuft wo.
+        vm.befehl("ps -eo pid,ppid,user,stat,cgroup:60,args --no-headers | grep -v ' \\[' ; "
+                  "echo PS-$((4+4))", r"PS-8")
         vm.befehl("su -c 'systemctl poweroff' root", r"Password: ?")
         vm.sende(ROOT_PW + "\r")
-        vm.ende()
-        ok("sauber heruntergefahren")
+        ok(f"sauber heruntergefahren ({vm.ende():.0f}s)")
     finally:
         vm.stopp()
 
@@ -235,8 +247,7 @@ def start2(platte, logdir, tmp):
                   "|| echo KEINE-WARNUNG-$((9+9))", r"active\s*\r?\n[^\n]*KEINE-WARNUNG-18")
         ok("Startpruefung gelaufen, keine Warnung bei einer Veyra-Platte")
         vm.sende("poweroff\r")
-        vm.ende()
-        ok("sauber heruntergefahren")
+        ok(f"sauber heruntergefahren ({vm.ende():.0f}s)")
     finally:
         vm.stopp()
 
@@ -260,7 +271,7 @@ def main():
         for f in sorted(os.listdir(logdir)):
             print(f"----- {f} (Ende) -----")
             with open(os.path.join(logdir, f), errors="replace") as h:
-                print("".join(h.readlines()[-60:]))
+                print("".join(h.readlines()[-200:]))
         return 1
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
