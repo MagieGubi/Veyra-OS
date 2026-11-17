@@ -161,8 +161,14 @@ class VM:
             self.p.kill()
             raise Fehler(f"VM hat sich nicht innerhalb {zeit}s ausgeschaltet")
         self._lies(0.5)
-        if "reboot: Power down" not in self.buf:
-            raise Fehler("kein sauberes Ausschalten (reboot: Power down fehlt)")
+        # Die serielle Ausgabe verliert beim Ausschalten gelegentlich Zeichen (im Lauf
+        # 44165729224 kam nur "...ot: Power down" an). Sauber heisst deshalb: QEMU endet
+        # selbst mit 0 und eine der beiden Meldungen des Ausschaltens ist vollstaendig da.
+        if self.p.returncode != 0:
+            raise Fehler(f"QEMU endete mit {self.p.returncode} statt 0")
+        if not re.search(r"reboot: Power down|systemd-shutdown\[1\]: Powering off", self.buf):
+            raise Fehler("kein sauberes Ausschalten (weder 'reboot: Power down' noch "
+                         "'systemd-shutdown[1]: Powering off' im Log)")
         haengt = sorted(set(re.findall(r"A stop job is running for ([^(\r\n]+)", self.buf)))
         if dauer > erlaubt:
             raise Fehler(f"Herunterfahren dauerte {dauer:.0f}s (erlaubt {erlaubt}s); "
