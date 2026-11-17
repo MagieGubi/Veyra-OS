@@ -161,7 +161,7 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Testnachweis:** teilweise: VPKG-Test 1 baut `veyra-release` zweimal identisch
   (022def38…); für Basispakete und Abbild noch keiner.
 
-### P1-5 GitHub Actions auf aktuelle Laufzeit ⬜
+### P1-5 GitHub Actions auf aktuelle Laufzeit ✅
 - **Ziel/Begründung:** Jeder Lauf warnt, dass `actions/upload-artifact@v4` und
   `actions/download-artifact@v4` noch auf Node.js 20 laufen. Sobald GitHub Node 20
   abschaltet, bricht der Build.
@@ -171,9 +171,11 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
 - **Abhängigkeiten/Risiken:** neue Hauptversionen können das Artefaktformat ändern; ein
   Fehler fällt erst im nächsten vollen Lauf auf.
 - **Akzeptanz:** CI grün ohne Node-20-Warnung, Artefakte wie bisher herunterladbar.
-- **Testnachweis:** noch keiner.
+- **Testnachweis:** umgestellt auf checkout@v5, cache@v5, upload-artifact@v6,
+  download-artifact@v7 (alle Node 24). Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590) grün, einzige Anmerkung ist der
+  Hinweis auf Ubuntu 26, keine Node-20-Warnung.
 
-### P1-6 `pre_remove` und fehlgeschlagene Install-Skripte ⬜
+### P1-6 `pre_remove` und fehlgeschlagene Install-Skripte ✅
 - **Ziel/Begründung:** Install-Skripte (`post_install`) laufen nach dem Abschluss und
   lassen sich nicht zurücknehmen; vor dem Entfernen gibt es keinen Haken (z. B. Dienst
   stoppen).
@@ -186,7 +188,8 @@ Status: ✅ erledigt (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus · �
   Angriffsfläche. Baut auf P1-1 auf.
 - **Akzeptanz:** Tests mit scheiterndem `post_install` und `pre_remove` zeigen eine klare
   Meldung und einen konsistenten Zustand.
-- **Testnachweis:** noch keiner.
+- **Testnachweis:** VPKG 0.5, Tests 29 und 30 in `tests/vpkg/vpkg-test.sh` (Marke
+  `skript-fehler`, `vpkg rerun-script`, `vpkg remove --no-scripts`); im CI-Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590) grün.
 
 ### P1-7 Diagnose bei fehlgeschlagenem Start ✅
 - **Ziel/Begründung:** Schlug der Boot-Test fehl, gab es nur das rohe Konsolen-Log mit

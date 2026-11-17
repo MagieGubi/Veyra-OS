@@ -44,7 +44,7 @@ cat > "$work/root/etc/fstab" <<'FSTAB'
 # Aenderungen gehen beim Ausschalten verloren.
 FSTAB
 cat > "$work/root/etc/issue" <<'ISSUE'
-Veyra OS Core 0.1 Live (Entwicklungsabbild) \l
+Veyra OS 0.5 Live (Entwicklungsabbild) \l
 Anmeldung: root, ohne Passwort. Aenderungen gehen beim Ausschalten verloren.
 
 ISSUE
@@ -67,7 +67,7 @@ umount "$work/root"
 losetup -d "$loop"
 loop=""
 cat > "$work/iso/veyra/LIESMICH.txt" <<'TXT'
-Veyra OS Core 0.1 Live
+Veyra OS 0.5 Live
 Startet per UEFI (in VirtualBox: EFI aktivieren). Anmeldung: root, ohne Passwort.
 Das System laeuft komplett im Arbeitsspeicher, es wird nichts installiert.
 TXT
@@ -82,7 +82,7 @@ echo ">> ISO zusammensetzen"
 find "$work/iso" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 rm -f "$iso"
 xorriso -as mkisofs -iso-level 3 -rational-rock -joliet \
-  -volid VEYRA_LIVE -appid "Veyra OS Core 0.1 Live" -publisher "Veyra OS" \
+  -volid VEYRA_LIVE -appid "Veyra OS 0.5 Live" -publisher "Veyra OS" \
   -partition_offset 16 \
   -append_partition 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B "$work/efiboot.img" \
   -appended_part_as_gpt \

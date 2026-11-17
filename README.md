@@ -4,9 +4,11 @@ Veyra OS ist ein minimalistisches Linux-System, das vollständig aus Quellcode g
 eigener Kernel auf Linux-Basis, eigenes Basissystem ohne fremde Distribution, eigener
 Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 
-> Stand: **Veyra Core 0.1** bootet, mit **VPKG 0.1**. Der Veyra-Kernel startet das selbst
-> gebaute Basissystem in QEMU direkt per UEFI bis zur Textanmeldung; im laufenden System
-> prüft VPKG alle 71 Pakete und installiert und entfernt ein Testpaket (CI-Lauf 38367370470).
+> Stand: **Veyra OS 0.5.0** (First Installable System). Der Installer bringt Veyra auf
+> einen ganzen Datenträger; die installierte Platte startet, die Ersteinrichtung legt
+> root-Passwort und Benutzer an, Anmeldung, `su` und Neustart funktionieren. Alles in
+> QEMU im CI nachgewiesen ([Lauf 44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590)), **nie auf echter Hardware**.
+> Release-Notizen: [docs/release-0.5.md](docs/release-0.5.md).
 
 ## Was schon da ist
 
@@ -21,12 +23,12 @@ Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 | Veyra-Kernel 6.18.56-veyra2 (Phase 4, ab veyra2 mit Laptop-Treibern) | `kernel/`, Jobs `kernel` und `kernel-reproducible` | im CI gebaut, zwei Builds bit-identisch |
 | Basissystem in chroot, Stufe 4a (gettext, bison, perl, Python, texinfo, util-linux) | `stage4/`, Job `stage4a` | im CI gebaut |
 | Basispakete als `.vpkg`, Stufe 4b (68 Pakete, glibc bis systemd) | `packages/core/`, `stage4/order-*.list` | im CI gebaut |
-| Paketverwaltung VPKG 0.5 (installieren, entfernen, Abhängigkeiten mit Versionsbedingungen, Transaktionen mit Rücknahme, `pre_remove`, gescheiterte Install-Skripte sichtbar, signierter Repository-Index, Downgrade-Schutz, nur https) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 31 Tests lokal (CI steht aus), Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
+| Paketverwaltung VPKG 0.5 (installieren, entfernen, Abhängigkeiten mit Versionsbedingungen, Transaktionen mit Rücknahme, `pre_remove`, gescheiterte Install-Skripte sichtbar, signierter Repository-Index, Downgrade-Schutz, nur https) | `packages/base/vpkg/`, [docs/vpkg.md](docs/vpkg.md) | 31 Tests im CI, Selbsttest im gebooteten Abbild ([Phase 6](docs/phase6.md)) |
 | Paketsignaturen (Ed25519), Paket-Repository als CI-Artefakt | `packages/base/veyra-keyring/`, [docs/signaturen.md](docs/signaturen.md) | eingebaut, Schlüssel `veyra-2026` aktiv |
 | Abbild und Boot-Test in QEMU (Phase 5) | `image/`, Job `image` | bootet bis zum Login (UEFI, ohne Bootloader, 6,4 s ab QEMU-Start mit KVM, [Messwerte](docs/messwerte.md)) |
 | Entwicklungs- und Testabbild getrennt: im Testabbild root gesperrt bis zur Ersteinrichtung (root-Passwort, erster Benutzer), Prüfung von Konten und Rechten | `packages/base/veyra-konten/`, `image/build-image.sh` (`VARIANTE=test`) | 17 Konten- und 4 Abbild-Tests, Testabbild bootet in QEMU (CI) |
-| Installer `veyra-install` (Kommandozeile): ganzer Datenträger, GPT mit EFI-Partition und ext4, Bestätigung per Gerätenamen, erkennt vorhandene Systeme, Konten schon bei der Installation, alte Partitionstabelle bei Fehler zurück, Warnung bei zwei Veyra-Platten | `packages/base/veyra-installer/`, [docs/installation.md](docs/installation.md) | 20 Tests auf virtuellen Platten; Installation auf leere Platte und Boot mit Selbsttest in QEMU (CI); Ersteinrichtung, Anmeldung und Neustart in QEMU (`image/install-test.py`, CI steht aus); nie auf echter Hardware |
-| Wurzelzertifikate für https (Mozilla-CA-Bündel aus certifi) | `packages/base/veyra-zertifikate/` | Selbsttest „TLS“ (CI steht aus) |
+| Installer `veyra-install` (Kommandozeile): ganzer Datenträger, GPT mit EFI-Partition und ext4, Bestätigung per Gerätenamen, erkennt vorhandene Systeme, Konten schon bei der Installation, alte Partitionstabelle bei Fehler zurück, Warnung bei zwei Veyra-Platten | `packages/base/veyra-installer/`, [docs/installation.md](docs/installation.md) | 20 Tests auf virtuellen Platten; Installation auf leere Platte und Boot mit Selbsttest in QEMU (CI); Ersteinrichtung, Anmeldung und Neustart in QEMU (`image/install-test.py`, CI); nie auf echter Hardware |
+| Wurzelzertifikate für https (Mozilla-CA-Bündel aus certifi) | `packages/base/veyra-zertifikate/` | Selbsttest „TLS“ im CI (github.com per TLS 1.3 geprüft) |
 | Netzwerk per Kabel (DHCP, Namensauflösung), Prüfung auf fehlgeschlagene Dienste und sauberes Herunterfahren | `packages/base/veyra-netzwerk/`, `image/boot-test.sh`, [Phase 6](docs/phase6.md) | in QEMU getestet (Abbild und Live-ISO), nicht auf echter Hardware |
 
 ## Bauen

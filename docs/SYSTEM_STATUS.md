@@ -1,6 +1,6 @@
 # Veyra OS: Systemstatus
 
-Stand: 16.11.2026. Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
+Stand: 17.11.2026, Veyra OS 0.5.0. Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
 [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md), Planung: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md),
 Aufgaben mit Akzeptanzkriterien: [../ROADMAP.md](../ROADMAP.md).
 
@@ -12,22 +12,24 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 
 | Subsystem | Status | Nachweis / Stand |
 | --- | --- | --- |
-| Build-System (Stufen 1 bis 5 in GitHub Actions) | ✅ | Lauf [43653042098](https://github.com/MagieGubi/Veyra-OS/actions/runs/43653042098), alle Jobs grün; Quellen gepinnt (`check-pinned.sh`: 0 offen) |
+| Build-System (Stufen 1 bis 5 in GitHub Actions) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590), alle Jobs grün; Quellen gepinnt (`check-pinned.sh`: 0 offen) |
 | Cross-Toolchain (GCC 15.2.0, glibc 2.42) | ✅ | CI |
 | Kernel 6.18.56-veyra2 | ✅ | zwei unabhängige Builds bit-identisch (Job „Kernel reproduzierbar?“) |
 | Basissystem (68 Pakete, glibc bis systemd 257.8) | ✅ | CI Stufe 4b; reproduzierbar ungeprüft |
-| VPKG 0.4.1 (Installieren, Entfernen, Abhängigkeiten mit Versionsbedingungen, Konflikte, Transaktionen, Signaturen, signierter Index) | ✅ | Lauf [43753648158](https://github.com/MagieGubi/Veyra-OS/actions/runs/43753648158), alle Jobs grün; Versionsbedingungen mit 27 Tests als root, 28 ohne root |
-| VPKG: Gruppen, Metapakete, Cache, Mirrors, HTTPS mit Mirror-Liste | ⬜ | – |
+| VPKG 0.5 (Installieren, Entfernen, Abhängigkeiten mit Versionsbedingungen, Konflikte, Transaktionen, Signaturen, signierter Index, `pre_remove`, gescheiterte Install-Skripte sichtbar, Netzquellen nur über https) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590), alle Jobs grün; 31 Tests als root, 32 ohne root |
+| VPKG: Gruppen, Metapakete, Cache, Mirrors | ⬜ | https mit Zertifikatsprüfung vorhanden (lokaler Test-Server), Mirrors und Cache fehlen |
+| Wurzelzertifikate (veyra-zertifikate, Mozilla-Bündel aus certifi) | ✅ | Selbsttest „TLS“ im Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): github.com per TLS 1.3 geprüft |
 | Paket-Repository | 🔧 | wird pro Lauf als CI-Artefakt gebaut und signiert (7 Tage); kein dauerhaftes Online-Repository |
 | Boot (UEFI, Kernel direkt als `BOOTX64.EFI`) | ✅ | Login nach etwa 7 s in QEMU |
 | Live-ISO (eigenes Init, SquashFS, Overlay) | ✅ | Boot von virtueller CD, Selbsttest OK |
-| Entwicklungs- und Testabbild getrennt, root gesperrt bis zur Ersteinrichtung | ✅ | Lauf [43653042098](https://github.com/MagieGubi/Veyra-OS/actions/runs/43653042098): 17 Konten- und 4 Abbild-Tests, Testabbild bootet, Selbsttest „Konten und Rechte: ok“; Ersteinrichtung nur per Test geprüft |
+| Entwicklungs- und Testabbild getrennt, root gesperrt bis zur Ersteinrichtung | ✅ | 17 Konten- und 4 Abbild-Tests; Ersteinrichtung an Konsole 1 per Tastatur in QEMU eingetippt (`image/install-test.py`, Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590)) |
 | Benutzerverwaltung | 🔧 | shadow ohne PAM; Ersteinrichtung legt einen Benutzer in `wheel` an; `sudo` fehlt |
 | Netzwerk per Kabel (DHCP, DNS), keine offenen Ports | ✅ | Selbsttest in QEMU (e1000e) |
 | WLAN, Bluetooth, Audio, Firewall, Zeitsynchronisierung, Drucker | ⬜ | – |
 | Hardware (NVMe, USB, Intel-Grafik, Tastatur) | 🔧 | Treiber im Kernel, nie auf echter Hardware geprüft |
 | Firmware | ⬜ | `regulatory.db` fehlt laut Kernel-Log |
-| Installer (`veyra-install`, Kommandozeile, ganzer Datenträger, GPT mit ESP und ext4) | ✅ | Lauf [43856635308](https://github.com/MagieGubi/Veyra-OS/actions/runs/43856635308): Installation auf leere 8-GiB-Platte, Boot in QEMU, Selbsttest OK (Variante system); 15 Installer-Tests; nie auf echter Hardware |
+| Installer 0.3 (`veyra-install`, Kommandozeile, ganzer Datenträger, GPT mit ESP und ext4, Konten bei der Installation, alte Partitionstabelle bei Fehler zurück) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): Installation auf leere 8-GiB-Platte; erster Start mit Ersteinrichtung, Anmeldung als neuer Benutzer, `su`, Neustart, Anmeldung als root; 20 Installer-Tests; nie auf echter Hardware |
+| Mehrere Veyra-Platten | 🔧 | Startprüfung warnt (Bootweg A); welche Platte startet, ist dann nicht festgelegt (Bootloader in 0.6) |
 | Updates und Rollback des Systems | ⬜ | nur Paket-Transaktionen mit Rücknahme |
 | Recovery | 🔧 | Live-ISO startet; kein dokumentierter Rettungsablauf |
 | Grafische Oberfläche | ⬜ | – |

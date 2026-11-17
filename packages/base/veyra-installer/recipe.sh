@@ -11,7 +11,7 @@ pkgdesc="Installer: Veyra auf einen Datentraeger installieren (GPT, EFI, ext4)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(veyra-install veyra_install.py veyra_fat.py veyra-rootpruefung)
-sha256sums=(9e3f4ab38dbdc304d7a5afa1bd260d82fd1aef25724c970811652f58f02c9444 a279b346e6a54b46a56af5a8a6e096840e8f2fca6d027f8d86815b8cc3c925d7 59416f398e11971468a5e5ea8582dc6f19b0bd4737254ad976406b2518a2e3a2 a47fb12e8592faf1650f20f4dfdae687a52807f829fb6ea9e078ae8d9ca6eaaf)
+sha256sums=(9e3f4ab38dbdc304d7a5afa1bd260d82fd1aef25724c970811652f58f02c9444 4bdf6ef076a8eea223028ecb0d819e727d705a04bf698dab22a34e0fee762731 59416f398e11971468a5e5ea8582dc6f19b0bd4737254ad976406b2518a2e3a2 a47fb12e8592faf1650f20f4dfdae687a52807f829fb6ea9e078ae8d9ca6eaaf)
 depends=(python util-linux e2fsprogs coreutils vpkg veyra-konten)
 
 package() {
