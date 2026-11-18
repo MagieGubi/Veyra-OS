@@ -286,14 +286,19 @@ def start3(platte, logdir, tmp):
     for versuch in range(1, 6):
         vm = VM(platte, os.path.join(logdir, f"start3-{versuch}.log"), tmp)
         try:
-            m = vm.erwarte(r"veyra login:|Kernel panic", 300)
-            if m.group(0) == "Kernel panic":
+            # Bis zur Anmeldung oder bis QEMU endet (Neustart nach panic=3, -no-reboot). Die
+            # serielle Ausgabe verliert manchmal Zeichen; deshalb zaehlt jedes der Zeichen
+            # einer Panik und erst nach dem Ende von QEMU wird ausgewertet.
+            bis = time.time() + 300
+            while "veyra login:" not in vm.buf and vm.p.poll() is None:
+                if time.time() > bis:
+                    raise Fehler("weder Anmeldung noch Neustart innerhalb 300s")
+                vm._lies(0.5)
+            if "veyra login:" not in vm.buf:
+                vm._lies(1)
+                if not re.search(r"Kernel panic|Unable to mount root|Rebooting in \d+ seconds", vm.buf):
+                    raise Fehler("QEMU endete ohne Anmeldung und ohne Kernel panic")
                 fehlstarts += 1
-                bis = time.time() + 90
-                while vm.p.poll() is None and time.time() < bis:
-                    vm._lies(0.5)
-                if vm.p.poll() is None:
-                    raise Fehler("nach der Kernel panic kein Neustart (panic=3)")
                 ok(f"Versuch {versuch}: neuer Kernel startet nicht (Kernel panic), Neustart")
                 continue
             if fehlstarts != 3:
