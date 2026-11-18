@@ -40,7 +40,11 @@ grep -vE '^\s*(#|$)' "$list" | while read -r url sig keyurl; do
   # Welcher Schluessel hat signiert? (VALIDSIG nennt Unterschluessel und Primaerschluessel)
   st=$(gpg --status-fd 1 --verify "$work/$file.sig" "$dest/$file" 2>/dev/null || true)
   primary=$(echo "$st" | awk '$2 == "VALIDSIG" {print $NF}')
-  [ -n "$primary" ] || die "GPG-Signatur ungueltig oder nicht vom Schluessel aus $keyurl: $file"
+  if [ -z "$primary" ]; then
+    echo "   Schluessel aus $keyurl:" >&2; fprs "$work/projekt.key" | sed 's/^/     /' >&2
+    echo "   Ausgabe von gpg --verify:" >&2; printf '%s\n' "$st" | while IFS= read -r l; do echo "     $l"; done >&2
+    die "GPG-Signatur ungueltig oder nicht vom Schluessel aus $keyurl: $file"
+  fi
   dl "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x$primary" "$work/keyserver.key" \
     || die "Schluessel $primary nicht auf keyserver.ubuntu.com: zweite Quelle fehlt"
   fprs "$work/keyserver.key" | grep -qx "$primary" || die "keyserver.ubuntu.com liefert einen anderen Schluessel als $primary"
