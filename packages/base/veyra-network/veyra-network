@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""veyra-network: Netzwerk ansehen, WLAN verbinden, Fehler suchen (Veyra 0.6).
+
+  veyra-network [status]          Geraete, Adressen, Standardroute, DNS, Zeitabgleich
+  veyra-network geraete           Netzwerkgeraete (Ethernet, WLAN) mit Treiber und Zustand
+  veyra-network wlan liste        WLAN-Netze in Reichweite (braucht iwd)
+  veyra-network wlan verbinde NETZ   verbinden; das Passwort fragt iwctl selbst ab
+  veyra-network wlan trenne
+  veyra-network dns-test [NAME]   Namensaufloesung pruefen (Standard: example.org)
+  veyra-network diagnose          alles fuer einen Fehlerbericht, ohne Passwoerter und
+                                  ohne MAC-Adressen
+
+veyra-network liest nur aus systemd-networkd, systemd-resolved, iwd und /sys. Gespeicherte
+WLAN-Passwoerter (/var/lib/iwd) liest es nie.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+SYS = os.environ.get("VEYRA_NETWORK_SYS", "/sys")      # fuer Tests
+MAC_RE = re.compile(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b")
+
+
+class Fehler(Exception):
+    pass
+
+
+def lauf(cmd, pruefen=False, eingabe=None):
+    if not shutil.which(cmd[0]):
+        return None
+    r = subprocess.run(cmd, text=True, capture_output=True, input=eingabe)
+    if pruefen and r.returncode != 0:
+        raise Fehler(f"{' '.join(cmd)}: {(r.stderr or r.stdout).strip()}")
+    return r
+
+
+def lies(pfad):
+    try:
+        with open(pfad) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def geraete():
+    out = []
+    d = os.path.join(SYS, "class/net")
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        p = os.path.join(d, n)
+        if n == "lo" or not os.path.exists(os.path.join(p, "device")):
+            continue
+        wlan = os.path.isdir(os.path.join(p, "wireless")) or os.path.exists(os.path.join(p, "phy80211"))
+        t = os.path.join(p, "device/driver")
+        out.append({"name": n, "art": "WLAN" if wlan else "Ethernet",
+                    "treiber": os.path.basename(os.readlink(t)) if os.path.islink(t) else None,
+                    "zustand": lies(os.path.join(p, "operstate")) or "?"})
+    return out
+
+
+def rfkill():
+    out = []
+    d = os.path.join(SYS, "class/rfkill")
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        p = os.path.join(d, n)
+        out.append({"name": lies(os.path.join(p, "name")), "typ": lies(os.path.join(p, "type")),
+                    "soft": lies(os.path.join(p, "soft")) == "1", "hard": lies(os.path.join(p, "hard")) == "1"})
+    return out
+
+
+def adressen():
+    r = lauf(["ip", "-j", "addr", "show"])
+    if not r or r.returncode != 0:
+        return {}
+    out = {}
+    for i in json.loads(r.stdout or "[]"):
+        out[i["ifname"]] = [f"{a['local']}/{a['prefixlen']}" for a in i.get("addr_info", [])
+                            if a.get("scope") == "global"]
+    return out
+
+
+def standardroute():
+    out = []
+    for fam in ("-4", "-6"):
+        r = lauf(["ip", "-j", fam, "route", "show", "default"])
+        if r and r.returncode == 0:
+            for x in json.loads(r.stdout or "[]"):
+                out.append(f"{x.get('gateway', 'direkt')} ueber {x.get('dev', '?')}")
+    return out
+
+
+def dns_server():
+    r = lauf(["resolvectl", "dns"])
+    if not r or r.returncode != 0:
+        return []
+    return [z.strip() for z in r.stdout.splitlines() if z.strip() and not z.strip().endswith(":")]
+
+
+def zeitabgleich():
+    r = lauf(["timedatectl", "show", "-p", "NTPSynchronized", "--value"])
+    if not r or r.returncode != 0:
+        return "unbekannt"
+    return "synchron" if r.stdout.strip() == "yes" else "nicht synchron"
+
+
+def iwd_aktiv():
+    r = lauf(["systemctl", "is-active", "iwd.service"])
+    return bool(r) and r.stdout.strip() == "active"
+
+
+def wlan_geraet(name=None):
+    w = [g["name"] for g in geraete() if g["art"] == "WLAN"]
+    if not w:
+        raise Fehler("kein WLAN-Geraet (veyra-hwinfo zeigt, ob ein WLAN-Chip ohne Treiber oder Firmware da ist)")
+    if name and name not in w:
+        raise Fehler(f"{name} ist kein WLAN-Geraet (vorhanden: {', '.join(w)})")
+    if not shutil.which("iwctl"):
+        raise Fehler("iwd ist nicht installiert (vpkg install iwd)")
+    if not iwd_aktiv():
+        raise Fehler("iwd laeuft nicht (systemctl enable --now iwd)")
+    return name or w[0]
+
+
+def cmd_geraete(_a):
+    g = geraete()
+    if not g:
+        print("Keine Netzwerkgeraete gefunden.")
+        return 1
+    for x in g:
+        print(f"{x['name']:<12} {x['art']:<9} Treiber {x['treiber'] or '-':<14} {x['zustand']}")
+    return 0
+
+
+def cmd_status(_a):
+    adr = adressen()
+    for x in geraete():
+        print(f"{x['name']:<12} {x['art']:<9} {x['zustand']:<8} {', '.join(adr.get(x['name'], [])) or '-'}")
+    print(f"Standardroute: {'; '.join(standardroute()) or 'keine'}")
+    print(f"DNS:           {'; '.join(dns_server()) or 'keine Server'}")
+    print(f"Zeitabgleich:  {zeitabgleich()}")
+    gesperrt = [r["name"] for r in rfkill() if r["soft"] or r["hard"]]
+    if gesperrt:
+        print(f"Funk gesperrt: {', '.join(gesperrt)} (rfkill; Hardware-Schalter oder Taste pruefen)")
+    return 0
+
+
+def cmd_wlan(a):
+    dev = wlan_geraet(a.geraet)
+    if a.aktion == "liste":
+        lauf(["iwctl", "station", dev, "scan"], pruefen=True)
+        r = lauf(["iwctl", "station", dev, "get-networks"], pruefen=True)
+        print(re.sub(r"\x1b\[[0-9;]*m", "", r.stdout).rstrip())
+        return 0
+    if a.aktion == "verbinde":
+        if not a.netz:
+            raise Fehler("verbinde braucht den Namen des Netzes")
+        # iwctl fragt das Passwort selbst ab (ohne Echo); es erscheint nie in einer
+        # Kommandozeile, einem Log oder in veyra-network.
+        return subprocess.run(["iwctl", "station", dev, "connect", a.netz]).returncode
+    lauf(["iwctl", "station", dev, "disconnect"], pruefen=True)
+    print(f"{dev} getrennt.")
+    return 0
+
+
+def cmd_dns_test(a):
+    r = lauf(["resolvectl", "query", "--cache=no", a.name])
+    if r is None:
+        raise Fehler("resolvectl fehlt (systemd-resolved)")
+    if r.returncode != 0:
+        print(f"DNS-Test FEHLER: {a.name} nicht aufloesbar: {(r.stderr or r.stdout).strip()}")
+        return 1
+    adr = re.findall(r"(\d+\.\d+\.\d+\.\d+|[0-9a-f:]+:[0-9a-f:]+)", r.stdout)
+    print(f"DNS-Test ok: {a.name} -> {', '.join(dict.fromkeys(adr)) or r.stdout.strip()}")
+    return 0
+
+
+def ohne_geheimnisse(text):
+    text = MAC_RE.sub("xx:xx:xx:xx:xx:xx", text)
+    return re.sub(r"(?i)(passphrase|psk|password|passwort)\s*[=:]\s*\S+", r"\1=<entfernt>", text)
+
+
+def cmd_diagnose(_a):
+    teile = [("Geraete", lambda: json.dumps(geraete(), indent=1)),
+             ("Funk (rfkill)", lambda: json.dumps(rfkill(), indent=1)),
+             ("Adressen", lambda: json.dumps(adressen(), indent=1)),
+             ("Standardroute", lambda: "\n".join(standardroute()) or "keine"),
+             ("DNS-Server", lambda: "\n".join(dns_server()) or "keine"),
+             ("Zeitabgleich", zeitabgleich)]
+    for titel, cmd in (("networkctl", ["networkctl", "status", "--no-pager"]),
+                       ("resolvectl", ["resolvectl", "status", "--no-pager"]),
+                       ("iwd", ["systemctl", "status", "--no-pager", "iwd.service"]),
+                       ("Dienste mit Fehlern", ["systemctl", "--failed", "--no-pager", "--no-legend"]),
+                       ("Kernel: Netzwerk und Firmware", ["journalctl", "-k", "-b", "--no-pager", "-g",
+                                                          "firmware|iwlwifi|wlan|link (is|becomes)"])):
+        def f(cmd=cmd):
+            r = lauf(cmd)
+            return "(Programm fehlt)" if r is None else (r.stdout + r.stderr).strip() or "(leer)"
+        teile.append((titel, f))
+    for titel, f in teile:
+        print(f"===== {titel}")
+        try:
+            print(ohne_geheimnisse(f()))
+        except (OSError, ValueError) as e:
+            print(f"(nicht lesbar: {e})")
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="veyra-network", description=__doc__.split("\n")[0],
+                                 epilog="\n".join(__doc__.split("\n")[2:]),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="befehl")
+    sub.add_parser("status")
+    sub.add_parser("geraete")
+    p = sub.add_parser("wlan")
+    p.add_argument("aktion", choices=("liste", "verbinde", "trenne"))
+    p.add_argument("netz", nargs="?")
+    p.add_argument("--geraet")
+    p = sub.add_parser("dns-test")
+    p.add_argument("name", nargs="?", default="example.org")
+    sub.add_parser("diagnose")
+    a = ap.parse_args(argv)
+    try:
+        return {None: cmd_status, "status": cmd_status, "geraete": cmd_geraete, "wlan": cmd_wlan,
+                "dns-test": cmd_dns_test, "diagnose": cmd_diagnose}[a.befehl](a)
+    except Fehler as e:
+        print(f"veyra-network: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

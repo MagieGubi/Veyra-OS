@@ -175,6 +175,16 @@ print(f"{c} Threads, {m} MiB, {p} PCI-Geraete, {o} ohne Treiber")' > /run/veyra-
 else
   log "Hardware: FEHLER ($(tail -n 1 /run/veyra-hwinfo.txt 2>/dev/null))"; fail=1
 fi
+# Netzwerkwerkzeug (veyra-network): die Netzwerkkarte der VM erscheint, die Diagnose laeuft
+# und enthaelt keine MAC-Adresse.
+if ! veyra-network geraete 2>&1 | grep -q 'Ethernet'; then
+  log "veyra-network: FEHLER (keine Ethernet-Karte in veyra-network geraete)"; fail=1
+elif veyra-network diagnose > /run/veyra-network-diagnose.txt 2>&1 \
+     && ! grep -qE '([0-9a-f]{2}:){5}[0-9a-f]{2}' /run/veyra-network-diagnose.txt; then
+  log "veyra-network: ok ($(veyra-network geraete | head -n 1 | tr -s ' '), Diagnose ohne MAC-Adressen)"
+else
+  log "veyra-network: FEHLER (Diagnose gescheitert oder mit MAC-Adresse)"; fail=1
+fi
 # Kernel-Haertung (veyra-sicherheit, Kernel-Fragmente veyra-50/60): jeder sysctl-Wert aus der
 # Paketdatei muss im laufenden System gelten, Yama muss aktiv sein, nftables im Kernel.
 if [ -f /usr/lib/sysctl.d/50-veyra-sicherheit.conf ]; then
