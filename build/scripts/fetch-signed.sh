@@ -4,7 +4,8 @@
 #
 # Aufruf: fetch-signed.sh SOURCES.LIST SOURCES.LOCK ZIEL
 #
-# Zeilen der Liste: URL  SIGNATUR-URL  SCHLUESSEL-URL  (oder widerruf:URL, siehe pruefe_widerrufen)
+# Zeilen der Liste: URL  SIGNATUR-URL  SCHLUESSEL-URL  (oder widerruf:URL, siehe pruefe_widerrufen;
+#                   oder URL - -: ohne Signatur, nur mit festgeschriebenem SHA-256)
 # - Steht die Datei schon in SOURCES.LOCK, zaehlt nur der festgeschriebene SHA-256.
 # - Sonst: Schluessel von SCHLUESSEL-URL (Seite des Projekts, https) laden; denselben
 #   Fingerabdruck zusaetzlich von keyserver.ubuntu.com holen; nur wenn beide Quellen genau diesen
@@ -90,6 +91,9 @@ grep -vE '^\s*(#|$)' "$list" | while read -r url sig keyurl; do
     echo "   ok (sha256) $file"
     continue
   fi
+  # "-" statt Signatur: das Projekt signiert nicht; dann zaehlt nur ein im Repository
+  # festgeschriebener SHA-256 (wie er geprueft wurde, steht in der Liste beim Eintrag).
+  [ "$sig" != - ] || die "$file hat keine Signatur und steht nicht in $lock (erst von Hand pruefen und festschreiben)"
   [ -n "$sig" ] && [ -n "$keyurl" ] || die "$file: Signatur- oder Schluessel-URL fehlt"
   dl "$sig" "$work/$file.sig" || die "Signatur nicht ladbar: $sig"
   export GNUPGHOME=$work/gnupg; rm -rf "$GNUPGHOME"; mkdir -m 700 "$GNUPGHOME"

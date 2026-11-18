@@ -5,13 +5,13 @@
 # heissen (Bootweg A, docs/PLAN_0.5.md). Alle vier liegen neben diesem Rezept; bei jeder Aenderung daran muss
 # sha256sums angepasst werden (tests/installer/installer-test.sh prueft das).
 pkgname=veyra-installer
-pkgver=0.3
+pkgver=0.4
 pkgrel=1
 pkgdesc="Installer: Veyra auf einen Datentraeger installieren (GPT, EFI, ext4)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(veyra-install veyra_install.py veyra_fat.py veyra-rootpruefung)
-sha256sums=(9e3f4ab38dbdc304d7a5afa1bd260d82fd1aef25724c970811652f58f02c9444 4bdf6ef076a8eea223028ecb0d819e727d705a04bf698dab22a34e0fee762731 59416f398e11971468a5e5ea8582dc6f19b0bd4737254ad976406b2518a2e3a2 a47fb12e8592faf1650f20f4dfdae687a52807f829fb6ea9e078ae8d9ca6eaaf)
+sha256sums=(d360e0c4ed02f60c786dd8ddeddc76a7dcc6309cfa34da562d73ca2af75470ae be1c7643388ddc4ecd9722f4a0cdf18755f7cee0a41bfc75ccdd65200d2a1303 69a77d1a3f675bd2562febbc21cd746097eae5d192babd50fca222f81ed444bf a47fb12e8592faf1650f20f4dfdae687a52807f829fb6ea9e078ae8d9ca6eaaf)
 depends=(python util-linux e2fsprogs coreutils vpkg veyra-konten)
 
 package() {

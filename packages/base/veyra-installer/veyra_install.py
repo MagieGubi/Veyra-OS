@@ -6,10 +6,14 @@ Ablauf einer Installation (installiere):
      zweite Partition veyra-root auf einem anderen Datentraeger. Vorhandene
      Partitionen und erkannte Systeme werden gemeldet; ueberschrieben wird nur, wenn
      die Oberflaeche die Bestaetigung (Geraetename) eingeholt hat.
-  2. GPT schreiben: 1  EFI-Systempartition (512 MiB, FAT32) mit dem Veyra-Kernel als
-     \\EFI\\BOOT\\BOOTX64.EFI, 2  Root (ext4, Partitionsname veyra-root, Rest der Platte).
-     Der Kernel startet ohne Bootloader und findet sein Root ueber
-     root=PARTLABEL=veyra-root (eingebaute Kommandozeile).
+  2. GPT schreiben: 1  EFI-Systempartition (512 MiB, FAT32), 2  Root (ext4,
+     Partitionsname veyra-root, Rest der Platte). Bootweg (ab 0.6):
+     - systemd-boot (Standard): \\EFI\\BOOT\\BOOTX64.EFI ist systemd-boot, der Kernel liegt
+       unter /veyra/VERSION/linux, der Eintrag loader/entries/veyra-VERSION+3.conf findet
+       Root ueber root=PARTUUID=... und zaehlt Startversuche (Rueckfall, siehe
+       docs/recovery.md); erst ein vollstaendiger Start macht den Eintrag dauerhaft.
+     - direkt (Rueckfallweg aus 0.5): der Kernel selbst ist BOOTX64.EFI und findet Root
+       ueber root=PARTLABEL=veyra-root (eingebaute Kommandozeile).
   3. Root-Dateisystem anlegen, das Quellsystem hineinkopieren (in der Live-ISO das
      unveraenderte SquashFS unter /run/veyra-live/sfs) und als installiertes System
      einrichten: root gesperrt bis zur Ersteinrichtung an Konsole 1, su nur fuer wheel,
@@ -41,6 +45,9 @@ ESP_NAME = "veyra-efi"
 ESP_TYP = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
 LIVE_QUELLE = "/run/veyra-live/sfs"
 KERNEL_MUSTER = "usr/lib/modules/*/vmlinuz"
+SD_BOOT = "usr/lib/systemd/boot/efi/systemd-bootx64.efi"
+BOOTWEGE = ("systemd-boot", "direkt")
+BOOT_VERSUCHE = 3             # Startversuche, bevor systemd-boot einen Eintrag als schlecht gilt
 
 # Partitionstypen, an denen ein vorhandenes System erkennbar ist (GPT-Typ-GUID).
 TYPEN = {
@@ -317,10 +324,14 @@ def finde_kernel(quelle):
     return kerne[0]
 
 
-def pruefe_quelle(quelle):
-    fehlt = [p for p in ("usr/lib/systemd/systemd", "usr/bin/vpkg", "usr/bin/veyra-einrichtung",
-                         "usr/bin/veyra-kontencheck", "etc/shadow", "var/lib/vpkg")
-             if not os.path.exists(os.path.join(quelle, p))]
+def pruefe_quelle(quelle, bootweg="systemd-boot"):
+    if bootweg not in BOOTWEGE:
+        raise InstallFehler(f"unbekannter Bootweg {bootweg!r} (erlaubt: {', '.join(BOOTWEGE)})")
+    noetig = ["usr/lib/systemd/systemd", "usr/bin/vpkg", "usr/bin/veyra-einrichtung",
+              "usr/bin/veyra-kontencheck", "etc/shadow", "var/lib/vpkg"]
+    if bootweg == "systemd-boot":
+        noetig.append(SD_BOOT)
+    fehlt = [p for p in noetig if not os.path.exists(os.path.join(quelle, p))]
     if fehlt:
         raise InstallFehler(f"{quelle} ist kein vollstaendiges Veyra-System, es fehlt: "
                             + ", ".join("/" + p for p in fehlt))
@@ -368,8 +379,10 @@ def richte_ein(root, hostname="veyra", melde=print):
     with open(os.path.join(etc, "fstab"), "w") as f:
         f.write("# Dateisystem          Ziel  Typ   Optionen  dump  fsck\n"
                 f"PARTLABEL={ROOT_NAME}   /     ext4  defaults  1     1\n"
-                "# EFI-Systempartition (Kernel als BOOTX64.EFI); nur bei Bedarf einhaengen:\n"
-                f"PARTLABEL={ESP_NAME}    /efi  vfat  noauto,nofail,umask=0077  0  2\n")
+                "# EFI-Systempartition: beim ersten Zugriff einhaengen (systemd-bless-boot,\n"
+                "# veyra-kernel-update), nach 60 s ohne Zugriff wieder aushaengen:\n"
+                f"PARTLABEL={ESP_NAME}    /efi  vfat  "
+                "noauto,x-systemd.automount,x-systemd.idle-timeout=60,nofail,umask=0077  0  2\n")
     os.makedirs(os.path.join(root, "efi"), mode=0o700, exist_ok=True)
     with open(os.path.join(etc, "hostname"), "w") as f:
         f.write(hostname + "\n")
@@ -442,7 +455,31 @@ def _stelle_tabelle_her(ziel, groesse, sicherung):
     subprocess.run(["blockdev", "--rereadpt", ziel], capture_output=True)
 
 
-def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=print, konten=None):
+def esp_dateien(quelle, kernel, partuuid, bootweg):
+    """Inhalt der EFI-Systempartition: {Pfad: bytes}."""
+    with open(kernel, "rb") as f:
+        k = f.read()
+    if bootweg == "direkt":
+        return {"EFI/BOOT/BOOTX64.EFI": k}
+    with open(os.path.join(quelle, SD_BOOT), "rb") as f:
+        sdb = f.read()
+    kver = os.path.basename(os.path.dirname(kernel))
+    eintrag = (f"title      Veyra OS\n"
+               f"version    {kver}\n"
+               f"sort-key   veyra\n"
+               f"linux      /veyra/{kver}/linux\n"
+               f"options    root=PARTUUID={partuuid} rw\n")
+    return {
+        "EFI/BOOT/BOOTX64.EFI": sdb,
+        "EFI/systemd/systemd-bootx64.efi": sdb,
+        "loader/loader.conf": b"timeout 3\ndefault veyra-*\neditor no\n",
+        f"veyra/{kver}/linux": k,
+        f"loader/entries/veyra-{kver}+{BOOT_VERSUCHE}.conf": eintrag.encode(),
+    }
+
+
+def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=print, konten=None,
+                bootweg="systemd-boot"):
     """Installiert QUELLE auf ZIEL. Die Bestaetigung muss die Oberflaeche vorher einholen.
 
     KONTEN: None (Ersteinrichtung beim ersten Start) oder eine Funktion konten(root), die
@@ -453,7 +490,7 @@ def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=prin
     moeglich: die Root-Partition heisst bis zum Schluss veyra-unfertig und startet nicht."""
     if os.geteuid() != 0:
         raise InstallFehler("der Installer braucht root")
-    kernel = pruefe_quelle(quelle)
+    kernel = pruefe_quelle(quelle, bootweg)
     info = untersuche(ziel, quelle)
     if info["hindernisse"]:
         raise InstallFehler("Installation nicht moeglich:\n  " + "\n  ".join(info["hindernisse"]))
@@ -472,15 +509,18 @@ def installiere(ziel, quelle, mit_selbsttest=False, hostname="veyra", melde=prin
         _, neu = _partitionen(ziel)
         if len(neu) != 2 or neu[0]["start"] != esp["start"] or neu[1]["start"] != rootp["start"]:
             raise InstallFehler("Partitionstabelle nach dem Schreiben nicht wie geplant")
+        partuuid = lauf(["sfdisk", "--part-uuid", ziel, "2"]).strip().lower()
+        if len(partuuid) != 36:
+            raise InstallFehler(f"PARTUUID der Root-Partition nicht lesbar: {partuuid!r}")
     except (InstallFehler, OSError) as e:
         _stelle_tabelle_her(ziel, info["groesse"], sicherung)
         raise InstallFehler(f"{e}\nDie alte Partitionstabelle ist wiederhergestellt, "
                             "auf dem Ziel wurde nichts veraendert.") from e
 
-    melde(f"EFI-Systempartition (FAT32) mit Kernel {os.path.basename(os.path.dirname(kernel))}")
-    with open(kernel, "rb") as f:
-        k = f.read()
-    veyra_fat.schreibe_fat32(ziel, esp["start"], esp["groesse"], {"EFI/BOOT/BOOTX64.EFI": k})
+    melde(f"EFI-Systempartition (FAT32) mit Kernel {os.path.basename(os.path.dirname(kernel))}, "
+          f"Bootweg {bootweg}")
+    veyra_fat.schreibe_fat32(ziel, esp["start"], esp["groesse"],
+                             esp_dateien(quelle, kernel, partuuid, bootweg))
 
     loop = mnt = None
     try:

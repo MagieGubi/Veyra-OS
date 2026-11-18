@@ -1,5 +1,7 @@
 # Stufe 4b, Teil 4: Pakete ueber LFS 12.4 hinaus (Veyra 0.6). Quellen und ihre Pruefung stehen
 # in stage4/sources-4.list (Signatur des Projekts, Schluessel aus zwei Quellen abgeglichen).
+# systemd-boot nutzt die schon festgeschriebene systemd-Quelle und pyelftools (PyPI, siehe dort).
 libmnl
 libnftnl
 nftables
+systemd-boot

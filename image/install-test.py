@@ -219,6 +219,9 @@ def start1(platte, logdir, tmp):
         ok("/etc/shadow fuer Benutzer nicht lesbar")
         vm.befehl("test -e /var/lib/veyra/einrichtung-fertig && echo FERTIG-$((2+3))", r"FERTIG-5")
         ok("Ersteinrichtung abgeschlossen")
+        vm.befehl("tr -d '\\000' < /sys/firmware/efi/efivars/LoaderInfo-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f; "
+                  "echo; echo LADER-$((6+7))", r"systemd-boot [0-9][^\n]*\n[^\n]*LADER-13")
+        ok("gestartet ueber systemd-boot (EFI-Variable LoaderInfo)")
         vm.befehl("su -c 'echo UID-$(id -u)-$((5+5))' root", r"Password: ?")
         vm.sende(ROOT_PW + "\r")
         vm.erwarte(r"UID-0-10", 30)
@@ -249,6 +252,11 @@ def start2(platte, logdir, tmp):
         ok("Variante system, systemd meldet running")
         vm.befehl("findmnt -n -o SOURCE,FSTYPE /; echo ROOT-$((8+8))", r"ext4\s*\r?\n[^\n]*ROOT-16")
         ok("Root ist ext4 von der installierten Platte")
+        # Boot-Zaehler: Start 1 lief vollstaendig, also hat systemd-bless-boot den Eintrag
+        # veyra-VERSION+3.conf in veyra-VERSION.conf umbenannt (gilt jetzt als gut).
+        vm.befehl("ls /efi/loader/entries/; echo EINTRAG-$((10+3))",
+                  r"veyra-[0-9.]+-veyra[0-9]+\.conf\s*\r?\n[^\n]*EINTRAG-13")
+        ok("Booteintrag nach vollstaendigem Start als gut markiert (systemd-bless-boot)")
         vm.befehl("systemctl is-active veyra-rootpruefung; test -e /run/issue.d/50-veyra-root.issue "
                   "|| echo KEINE-WARNUNG-$((9+9))", r"active\s*\r?\n[^\n]*KEINE-WARNUNG-18")
         ok("Startpruefung gelaufen, keine Warnung bei einer Veyra-Platte")

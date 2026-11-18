@@ -53,6 +53,8 @@ mkdir -p "$q/usr/lib/systemd" "$q/usr/bin" "$q/etc/veyra" "$q/var/lib/vpkg" "$q/
   "$q/usr/lib/modules/6.18.56-veyra2" "$q/usr/lib/veyra/selftest" "$q/proc" "$q/sys" "$q/dev" "$q/run" "$q/home"
 mkdir -p "$q/tmp" && chmod 1777 "$q/tmp"
 printf '#!/bin/sh\n' > "$q/usr/lib/systemd/systemd"; chmod 755 "$q/usr/lib/systemd/systemd"
+mkdir -p "$q/usr/lib/systemd/boot/efi"
+head -c 120000 /dev/urandom > "$q/usr/lib/systemd/boot/efi/systemd-bootx64.efi"
 cp "$here/packages/base/vpkg/vpkg" "$q/usr/bin/vpkg"
 cp "$here/packages/base/veyra-konten/veyra-einrichtung" "$here/packages/base/veyra-konten/veyra-kontencheck" "$q/usr/bin/"
 printf 'root:x:0:0:root:/root:/bin/bash\nnobody:x:65534:65534:nobody:/:/usr/bin/false\n' > "$q/etc/passwd"
@@ -148,8 +150,18 @@ read -r s1 z1 <<<"$start"
 dd if="$t/alt.img" of="$t/esp.part" bs=512 skip="$s1" count="$z1" status=none
 fsck.fat -n "$t/esp.part" > "$t/fsck.log" 2>&1 || { cat "$t/fsck.log"; fail "EFI-Partition fehlerhaft"; }
 mcopy -n -i "$t/esp.part" ::/EFI/BOOT/BOOTX64.EFI "$t/k2.bin"
-cmp -s "$t/k2.bin" "$q/usr/lib/modules/6.18.56-veyra2/vmlinuz" || fail "BOOTX64.EFI ist nicht der Kernel der Quelle"
-ok "EFI-Partition: FAT32 sauber, BOOTX64.EFI ist der Kernel des Quellsystems"
+cmp -s "$t/k2.bin" "$q/usr/lib/systemd/boot/efi/systemd-bootx64.efi" || fail "BOOTX64.EFI ist nicht systemd-boot"
+mcopy -n -i "$t/esp.part" ::/EFI/systemd/systemd-bootx64.efi "$t/k2.bin"
+cmp -s "$t/k2.bin" "$q/usr/lib/systemd/boot/efi/systemd-bootx64.efi" || fail "EFI/systemd/systemd-bootx64.efi fehlt"
+mcopy -n -i "$t/esp.part" ::/veyra/6.18.56-veyra2/linux "$t/k2.bin"
+cmp -s "$t/k2.bin" "$q/usr/lib/modules/6.18.56-veyra2/vmlinuz" || fail "Kernel der Quelle fehlt unter /veyra/VERSION/linux"
+puuid=$(sfdisk --part-uuid "$t/alt.img" 2 | tr '[:upper:]' '[:lower:]')
+mtype -i "$t/esp.part" '::/loader/entries/veyra-6.18.56-veyra2+3.conf' > "$t/eintrag" \
+  || fail "Booteintrag mit Boot-Zaehler (+3) fehlt"
+grep -qx "options    root=PARTUUID=$puuid rw" "$t/eintrag" || fail "Eintrag ohne PARTUUID der Root-Partition: $(cat "$t/eintrag")"
+grep -qx 'linux      /veyra/6.18.56-veyra2/linux' "$t/eintrag" || fail "Eintrag zeigt nicht auf den Kernel"
+mtype -i "$t/esp.part" ::/loader/loader.conf | grep -qx 'default veyra-\*' || fail "loader.conf ohne default"
+ok "EFI-Partition: FAT32 sauber, systemd-boot, Kernel des Quellsystems, Eintrag per PARTUUID mit Boot-Zaehler"
 
 n=$((n + 1))
 [ "$(lies alt.img /etc/veyra/variante)" = system ] || fail "Variante nicht 'system'"
@@ -178,10 +190,31 @@ gibt /var/lib/vpkg/installed/veyra-selftest || fail "Selbsttest fehlt trotz --mi
 { grep -q 'Pruefen: vpkg check' "$t/i.log" && grep -q 'Pruefen: veyra-kontencheck' "$t/i.log"; } || fail "Pruefungen nicht gelaufen"
 ok "--mit-selbsttest behaelt den Selbsttest; vpkg check und veyra-kontencheck liefen"
 
+# Bootweg direkt (Rueckfallweg aus 0.5) und Quelle ohne systemd-boot
+n=$((n + 1)); platte direkt.img
+"$inst" installiere "$t/direkt.img" --quelle "$q" --bootweg direkt --bestaetigt "$t/direkt.img" > "$t/i.log" 2>&1 \
+  || { cat "$t/i.log"; fail "Installation mit --bootweg direkt schlug fehl"; }
+read -r s1 z1 < <(sfdisk -J "$t/direkt.img" | python3 -c 'import json,sys; p=json.load(sys.stdin)["partitiontable"]["partitions"][0]; print(p["start"], p["size"])')
+dd if="$t/direkt.img" of="$t/esp.part" bs=512 skip="$s1" count="$z1" status=none
+mcopy -n -i "$t/esp.part" ::/EFI/BOOT/BOOTX64.EFI "$t/k2.bin"
+cmp -s "$t/k2.bin" "$q/usr/lib/modules/6.18.56-veyra2/vmlinuz" || fail "--bootweg direkt: BOOTX64.EFI ist nicht der Kernel"
+mdir -i "$t/esp.part" ::/loader > /dev/null 2>&1 && fail "--bootweg direkt: loader/ angelegt"
+rm -f "$t/esp.part" "$t/direkt.img"
+mkdir -p "$t/ohnesd" && cp -a "$q/." "$t/ohnesd/" && rm "$t/ohnesd/usr/lib/systemd/boot/efi/systemd-bootx64.efi"
+platte ohnesd.img
+if "$inst" installiere "$t/ohnesd.img" --quelle "$t/ohnesd" --bestaetigt "$t/ohnesd.img" > "$t/i.log" 2>&1; then
+  fail "Quelle ohne systemd-boot angenommen"
+fi
+grep -q 'systemd-bootx64.efi' "$t/i.log" || { cat "$t/i.log"; fail "fehlendes systemd-boot nicht genannt"; }
+[ -z "$(sfdisk -d "$t/ohnesd.img" 2>/dev/null)" ] || fail "Platte trotz fehlendem systemd-boot veraendert"
+rm -rf "$t/ohnesd" "$t/ohnesd.img"
+ok "--bootweg direkt: Kernel als BOOTX64.EFI wie in 0.5; Quelle ohne systemd-boot vorher abgelehnt"
+
 n=$((n + 1))
 lies alt.img /etc/fstab | grep -qE '^PARTLABEL=veyra-efi +/efi +vfat +noauto' || fail "ESP fehlt in der fstab"
 gibt /efi || fail "Einhaengepunkt /efi fehlt"
-ok "fstab: EFI-Systempartition unter /efi (noauto), Root ueber PARTLABEL"
+lies alt.img /etc/fstab | grep -q 'x-systemd.automount' || fail "ESP ohne automount (systemd-bless-boot braucht sie)"
+ok "fstab: EFI-Systempartition unter /efi (automount), Root ueber PARTLABEL"
 
 # Konten schon bei der Installation (Antworten zeilenweise von stdin)
 n=$((n + 1)); platte konten.img

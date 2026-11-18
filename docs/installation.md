@@ -13,11 +13,19 @@ System ein:
 
 | Partition | Größe | Inhalt |
 | --- | --- | --- |
-| 1 `veyra-efi` | 512 MiB | EFI-Systempartition (FAT32), Veyra-Kernel als `\EFI\BOOT\BOOTX64.EFI` |
+| 1 `veyra-efi` | 512 MiB | EFI-Systempartition (FAT32): systemd-boot, Kernel unter `/veyra/VERSION/linux`, Booteintrag |
 | 2 `veyra-root` | Rest | Root-Dateisystem (ext4) |
 
-Wie das Abbild startet das installierte System ohne Bootloader: die UEFI-Firmware startet
-den Kernel direkt, der Kernel findet sein Root über `root=PARTLABEL=veyra-root`.
+Ab 0.6 startet das installierte System über **systemd-boot** (`--bootweg systemd-boot`,
+Standard): `\EFI\BOOT\BOOTX64.EFI` ist systemd-boot, der Eintrag
+`loader/entries/veyra-VERSION+3.conf` findet Root über `root=PARTUUID=...` (also genau
+diese Platte, auch wenn ein Veyra-USB-Stick steckt) und zählt Startversuche. Erst ein
+vollständiger Start ohne fehlgeschlagene Units macht den Eintrag dauerhaft
+(`systemd-bless-boot` benennt ihn in `veyra-VERSION.conf` um); scheitert ein Eintrag
+dreimal, wählt systemd-boot einen anderen. Menü 3 Sekunden, Editor aus.
+
+`--bootweg direkt` installiert wie in 0.5 ohne Bootloader: der Kernel selbst ist
+`BOOTX64.EFI` und findet Root über `root=PARTLABEL=veyra-root` (eingebaute Kommandozeile).
 
 Im installierten System ist root gesperrt. Der Installer fragt an der Konsole, ob
 root-Passwort und Benutzer gleich festgelegt werden sollen (dieselbe Ersteinrichtung wie
@@ -67,12 +75,13 @@ umbenannt. Ein halb installiertes System startet also nicht versehentlich.
 
 ## Im installierten System
 
-- Die EFI-Partition steht in der fstab unter `/efi` (`noauto`, nur root): `mount /efi`.
+- Die EFI-Partition steht in der fstab unter `/efi` (beim ersten Zugriff eingehängt,
+  nach 60 s wieder ausgehängt, nur root).
 - Beim Start prüft `veyra-rootpruefung.service`, ob mehr als eine Partition `veyra-root`
   heißt (zum Beispiel installierte Platte und Veyra-USB-Stick). Dann steht eine Warnung im
   Journal, auf der Konsole und über der Anmeldeaufforderung, mit dem tatsächlich
-  gestarteten Gerät. Welcher Datenträger startet, ist in dem Fall nicht festgelegt; das
-  behebt erst ein Bootloader mit Einträgen per `PARTUUID` (geplant für 0.6).
+  gestarteten Gerät. Mit systemd-boot (ab 0.6) startet jede Platte ihr eigenes Root
+  (`PARTUUID`); nur mit `--bootweg direkt` ist offen, welches startet.
 
 ## Aufbau
 
@@ -80,7 +89,8 @@ umbenannt. Ein halb installiertes System startet also nicht versehentlich.
   Partitionieren, Kopieren, Einrichten, Prüfen), ohne Ein- und Ausgabe.
 - `packages/base/veyra-installer/veyra_fat.py`: schreibt das FAT32 der
   EFI-Systempartition. Das Basissystem hat kein `mkfs.fat`; das Modul legt das
-  Dateisystem mit den nötigen Dateien direkt an (nur kurze Namen, geprüft mit `fsck.fat`).
+  Dateisystem mit den nötigen Dateien direkt an (lange Namen ab 0.6, geprüft mit
+  `fsck.fat` und mtools).
 - `packages/base/veyra-installer/veyra-install`: Kommandozeile mit Rückfrage.
 - `packages/base/veyra-installer/veyra-rootpruefung`: Warnung bei zwei `veyra-root`.
 - `image/install-test.py`: startet die installierte Platte in QEMU, tippt die
@@ -93,8 +103,8 @@ nicht über `/dev/sdX1`; das funktioniert gleich für echte Datenträger und Abb
 
 - Nur ganze Datenträger, keine Installation neben Windows (kein Verkleinern vorhandener
   Partitionen, keine manuelle Partitionierung).
-- Kernel-Updates auf der EFI-Partition gibt es noch nicht (P3-3, P3-4); ebenso keinen
-  Bootloader und kein Secure Boot.
+- Kernel-Updates auf der EFI-Partition gibt es noch nicht (kommt mit `veyra-kernel-update`
+  in 0.6); kein Secure Boot.
 - Die Basispakete werden als fertiges System kopiert, mit ihrer VPKG-Datenbank, nicht
   einzeln über VPKG installiert. Dafür fehlt noch ein Paket für die Grunddateien
   (`/etc/passwd` und Co.).
