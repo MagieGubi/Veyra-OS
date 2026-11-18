@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-installer/veyra-rootpruefung
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -30,6 +30,8 @@ jobs:
           python3 -m py_compile packages/base/vpkg/vpkg
           build/scripts/fetch-extra.sh "$RUNNER_TEMP/quellen"
           VEYRA_QUELLEN=$RUNNER_TEMP/quellen bash tests/vpkg/vpkg-test.sh
+      - name: Firewall-Regeln testen
+        run: sudo apt-get install -y nftables && sudo bash tests/firewall/firewall-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
         run: bash tests/boot/diagnose-test.sh
       - name: Konten testen (Ersteinrichtung, Kontenpruefung)
@@ -454,9 +456,70 @@ jobs:
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
 
+  stage4b-4:
+    name: Basispakete Teil 4, nftables (Stufe 4b, ausserhalb LFS)
+    needs: stage4b-3
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache-Schluessel berechnen
+        id: key
+        run: echo "k=$(build/scripts/stage-key.sh 4)" >> "$GITHUB_OUTPUT"
+
+      - name: Fertigen Teil 4 aus dem Cache holen
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: out
+          key: stage4b-4-${{ steps.key.outputs.k }}
+
+      - name: Vorige Stufe holen
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: stage4b-3
+          path: in
+
+      - name: Platz auf dem Runner schaffen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Bootstrap-Container bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: docker build -t veyra-bootstrap build/container
+
+      - name: Pakete bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out
+          rm -rf in/SHA256SUMS in/packages in/stage4-sources.lock in/build-stage4b-3.log
+          docker run --rm --privileged -v "$PWD:/repo:ro" -v "$PWD/in:/in:ro" -v "$PWD/out:/out" veyra-bootstrap /repo/build/scripts/ci-stage4b-4.sh
+
+      - name: Ergebnis hochladen
+        run: sudo chown -R "$(id -u):$(id -g)" out
+      - uses: actions/upload-artifact@v6
+        with:
+          name: stage4b-4
+          path: |
+            out/veyra-stage4b-4.tar.zst
+            out/packages
+            out/stage4-sources.lock
+            out/build-stage4b-4.log
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
+      - uses: actions/upload-artifact@v6
+        with:
+          name: pakete-4b-4
+          path: out/packages
+          retention-days: 1   # nur Zwischenstand fuer die folgenden Jobs
+
+      - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
+        run: cat out/packages/SHA256SUMS out/stage4-sources.lock
+
   image:
     name: Abbild und Boot-Test in QEMU (Phase 5)
-    needs: [stage4b-3, kernel-reproducible]
+    needs: [stage4b-4, kernel-reproducible]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -473,7 +536,7 @@ jobs:
       - name: Basissystem holen
         uses: actions/download-artifact@v7
         with:
-          name: stage4b-3
+          name: stage4b-4
           path: sys
       - name: Kernel holen
         uses: actions/download-artifact@v7
@@ -487,10 +550,10 @@ jobs:
           pattern: pakete-4b-*
           path: basis
 
-      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, veyra-zertifikate, veyra-sicherheit, vpkg, Selbsttest)
+      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, veyra-zertifikate, veyra-sicherheit, veyra-firewall, vpkg, Selbsttest)
         run: |
           build/scripts/fetch-extra.sh "$RUNNER_TEMP/quellen"
-          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/veyra-zertifikate packages/base/veyra-sicherheit packages/base/vpkg packages/test/veyra-selftest; do
+          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/veyra-zertifikate packages/base/veyra-sicherheit packages/base/veyra-firewall packages/base/vpkg packages/test/veyra-selftest; do
             build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir extra "$r"
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
@@ -512,7 +575,7 @@ jobs:
 
       - name: Abbild bauen
         run: |
-          sudo image/build-image.sh sys/veyra-stage4b-3.tar.zst k/kernel extra veyra-0.5.img basis
+          sudo image/build-image.sh sys/veyra-stage4b-4.tar.zst k/kernel extra veyra-0.5.img basis
           sudo chown "$(id -u):$(id -g)" veyra-0.5.img
 
       - name: Boot-Test (UEFI, kein Bootloader) und VPKG-Selbsttest
@@ -624,7 +687,7 @@ jobs:
         if: success()
         run: |
           rm -f veyra-0.5.img veyra-0.5.vdi
-          sudo VARIANTE=test image/build-image.sh sys/veyra-stage4b-3.tar.zst k/kernel extra veyra-0.5-test.img basis
+          sudo VARIANTE=test image/build-image.sh sys/veyra-stage4b-4.tar.zst k/kernel extra veyra-0.5-test.img basis
           sudo chown "$(id -u):$(id -g)" veyra-0.5-test.img
       - name: Boot-Test des Testabbilds und Selbsttest
         if: success()

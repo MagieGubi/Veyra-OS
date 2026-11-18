@@ -6,12 +6,12 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.8
+pkgver=0.9
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit)
+depends=(vpkg systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit veyra-firewall nftables)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -141,6 +141,15 @@ if [ -e /etc/veyra/einrichtung-noetig ]; then
   else
     log "Ersteinrichtung: FEHLER (Dienst laeuft nicht: $(systemctl is-active veyra-einrichtung.service))"; fail=1
   fi
+fi
+# Firewall (veyra-firewall): Dienst aktiv, eingehend und Weiterleiten verwerfen.
+if ! systemctl is-active -q veyra-firewall.service; then
+  log "Firewall: FEHLER (veyra-firewall.service: $(systemctl is-active veyra-firewall.service))"; fail=1
+elif ! nft list chain inet veyra eingang 2>/dev/null | grep -q 'policy drop;' \
+     || ! nft list chain inet veyra weiterleiten 2>/dev/null | grep -q 'policy drop;'; then
+  log "Firewall: FEHLER (Regeln geladen, aber eingehend oder Weiterleiten nicht auf drop)"; fail=1
+else
+  log "Firewall: ok (nftables, eingehend und Weiterleiten verworfen, $(nft list ruleset | grep -c accept) Ausnahmen)"
 fi
 # Kernel-Haertung (veyra-sicherheit, Kernel-Fragmente veyra-50/60): jeder sysctl-Wert aus der
 # Paketdatei muss im laufenden System gelten, Yama muss aktiv sein, nftables im Kernel.

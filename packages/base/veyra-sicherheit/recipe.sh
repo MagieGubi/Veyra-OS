@@ -3,7 +3,7 @@
 # /etc/sysctl.d/ (gleicher Dateiname ersetzt diese Datei, hoehere Nummern gewinnen).
 # Der Selbsttest prueft die Werte im laufenden System.
 pkgname=veyra-sicherheit
-pkgver=0.1
+pkgver=0.2
 pkgrel=1
 pkgdesc="Sicherheits-Grundeinstellungen (sysctl)"
 license=MIT
@@ -20,9 +20,8 @@ kernel.kptr_restrict = 2
 kernel.dmesg_restrict = 1
 # ptrace nur auf eigene Kindprozesse (Yama)
 kernel.yama.ptrace_scope = 1
-# BPF nur fuer root; JIT-Code gehaertet
+# BPF nur fuer root (der Kernel hat keinen BPF-JIT, net.core.bpf_jit_harden entfaellt)
 kernel.unprivileged_bpf_disabled = 1
-net.core.bpf_jit_harden = 2
 # Kein Kernelwechsel im laufenden Betrieb per kexec
 kernel.kexec_load_disabled = 1
 # Keine Speicherabbilder von Programmen mit erhoehten Rechten

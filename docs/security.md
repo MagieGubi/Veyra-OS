@@ -19,16 +19,29 @@ für Gerätespeicher, kein `TIOCSTI`, Yama. Lockdown fehlt, weil es Modulsignatu
 (siehe unten). `build-kernel.sh` bricht ab, wenn Kconfig eine Option verwirft.
 
 Paket `veyra-sicherheit`, Datei `/usr/lib/sysctl.d/50-veyra-sicherheit.conf`: Kernel-Adressen
-und Kernel-Log nur für root, `ptrace` nur auf eigene Kindprozesse, BPF nur für root mit
-gehärtetem JIT, kein `kexec`, keine Speicherabbilder von setuid-Programmen, Schutz bei
+und Kernel-Log nur für root, `ptrace` nur auf eigene Kindprozesse, BPF nur für root (kein BPF-JIT im
+Kernel), kein `kexec`, keine Speicherabbilder von setuid-Programmen, Schutz bei
 Links, FIFOs und Dateien in fremden Verzeichnissen, keine ICMP-Umleitungen, kein
 Source-Routing, SYN-Cookies.
 
 Nachweis: Der Selbsttest liest jeden Wert der Datei im laufenden System zurück, prüft, dass
 Yama aktiv ist und nftables im Kernel steckt („Kernel-Härtung: ok“).
 
+## Firewall (0.6)
+
+Pakete `libmnl`, `libnftnl`, `nftables` (Stufe 4b, Teil 4; Quellen per Signatur des
+netfilter-Projekts geprüft, der Schlüssel muss von netfilter.org und vom Schlüsselserver
+übereinstimmen) und `veyra-firewall`. Der Dienst `veyra-firewall.service` lädt
+`/etc/nftables.conf` vor dem Netz: eingehend verwerfen außer Loopback, Antworten auf eigene
+Verbindungen, nötiges ICMP und ICMPv6 (Nachbarn, Router, Fehlermeldungen), begrenztes Ping
+und DHCP-Antworten; Weiterleiten verwerfen; ausgehend frei. Kein Port ist offen.
+
+Nachweis: `tests/firewall/firewall-test.sh` (`nft -c`, Grundsätze), Selbsttest
+„Firewall: ok“ und weiterhin „Netzwerk: ok“ (DHCP, DNS) und „Offene Ports: ok“ im
+gebooteten Abbild.
+
 ## Bewusst noch nicht
 
 - Modulsignaturen und Lockdown (Lockdown erzwingt Modulsignaturen): würden den bit-identischen Kernel-Build brechen (Entscheidung in
   PLAN_0.6.md).
-- Firewall-Regeln: der Kernel kann nftables, das Programm `nft` und die Regeln folgen.
+

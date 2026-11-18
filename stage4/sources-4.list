@@ -1,0 +1,7 @@
+# Quellen fuer Stufe 4b, Teil 4: URL  SIGNATUR-URL  SCHLUESSEL-URL
+# Geprueft von build/scripts/fetch-signed.sh: Der Schluessel kommt von der Seite des Projekts
+# (https) und muss mit demselben Fingerabdruck auf keyserver.ubuntu.com liegen; erst dann zaehlt
+# die Signatur, und der SHA-256 wird in stage4/sources.lock festgeschrieben.
+https://www.netfilter.org/pub/libmnl/libmnl-1.0.5.tar.bz2 https://www.netfilter.org/pub/libmnl/libmnl-1.0.5.tar.bz2.sig https://www.netfilter.org/files/coreteam-gpg-key.txt
+https://www.netfilter.org/pub/libnftnl/libnftnl-1.2.9.tar.xz https://www.netfilter.org/pub/libnftnl/libnftnl-1.2.9.tar.xz.sig https://www.netfilter.org/files/coreteam-gpg-key.txt
+https://www.netfilter.org/pub/nftables/nftables-1.1.3.tar.xz https://www.netfilter.org/pub/nftables/nftables-1.1.3.tar.xz.sig https://www.netfilter.org/files/coreteam-gpg-key.txt

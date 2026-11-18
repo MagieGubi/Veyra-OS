@@ -24,5 +24,8 @@ if [ "$1" != 4a ]; then
     done < <(grep -vE '^\s*(#|$)' "stage4/order-$i.list")
   done
 fi
+if [ "$1" != 4a ] && [ "$1" -ge 4 ]; then
+  files+=(build/scripts/ci-stage4b-4.sh build/scripts/fetch-signed.sh stage4/sources-4.list)
+fi
 for f in "${files[@]}"; do printf '%s  %s\n' "$(sha256sum < "$f" | cut -d' ' -f1)" "$f"; done \
   | sha256sum | cut -c1-32
