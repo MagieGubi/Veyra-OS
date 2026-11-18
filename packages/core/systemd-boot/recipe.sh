@@ -20,13 +20,16 @@ build() {
   cd "systemd-$pkgver"
   sed -e 's/GROUP="render"/GROUP="video"/' -e 's/GROUP="sgx", //' -i rules.d/50-udev-default.rules.in
   mkdir build && cd build
-  # Dieselben Optionen wie packages/core/systemd, dazu der Bootloader.
+  # Dieselben Optionen wie packages/core/systemd, dazu der Bootloader. Die SBAT-Angaben
+  # stehen fest drin: im chroot gibt es noch kein /etc/os-release (kommt mit veyra-release).
   meson setup .. --prefix=/usr --buildtype=release \
     -D default-dnssec=no -D firstboot=false -D install-tests=false -D ldconfig=false \
     -D rpmmacrosdir=no -D homed=disabled -D userdb=false -D man=disabled -D mode=release \
     -D pam=disabled -D dev-kvm-mode=0660 -D nobody-group=nogroup \
     -D sysupdate=disabled -D ukify=disabled -D docdir="/usr/share/doc/systemd-$pkgver" \
-    -D bootloader=enabled
+    -D bootloader=enabled \
+    -D sbat-distro=veyra -D sbat-distro-summary="Veyra OS" -D sbat-distro-pkgname=systemd-boot \
+    -D sbat-distro-version="$pkgver" -D sbat-distro-url=https://github.com/MagieGubi/Veyra-OS
   ninja
 }
 
