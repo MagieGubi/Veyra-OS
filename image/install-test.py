@@ -52,7 +52,7 @@ def ok(text):
 
 
 class VM:
-    def __init__(self, platte, log, tmp):
+    def __init__(self, platte, log, tmp, cdrom=None):
         self.ser = os.path.join(tmp, "seriell")
         self.mon = os.path.join(tmp, "monitor")
         vars_ = os.path.join(tmp, "vars.fd")
@@ -63,7 +63,7 @@ class VM:
             "qemu-system-x86_64", "-machine", f"q35,accel={accel}", "-m", "2048", "-smp", "2",
             "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF}",
             "-drive", f"if=pflash,format=raw,file={vars_}",
-            "-drive", f"file={platte},format=raw,if=virtio",
+            *self._laufwerke(platte, cdrom),
             "-chardev", f"socket,id=s0,path={self.ser},server=on,wait=off,logfile={log}",
             "-serial", "chardev:s0",
             "-monitor", f"unix:{self.mon},server,nowait",
@@ -84,6 +84,17 @@ class VM:
             self.m.recv(4096)  # Begruessung des Monitors
         except socket.timeout:
             pass
+
+    @staticmethod
+    def _laufwerke(platte, cdrom):
+        """Die Platte (virtio, im Gast /dev/vda); mit CDROM zusaetzlich eine CD, von der
+        die Firmware zuerst startet (bootindex), wie ein eingelegter Live-Datentraeger."""
+        if not cdrom:
+            return ["-drive", f"file={platte},format=raw,if=virtio"]
+        return ["-drive", f"if=none,id=cd,file={cdrom},format=raw,media=cdrom,readonly=on",
+                "-device", "ide-cd,drive=cd,bootindex=0",
+                "-drive", f"if=none,id=hd,file={platte},format=raw",
+                "-device", "virtio-blk-pci,drive=hd,bootindex=1"]
 
     def _lies(self, warte):
         ende = time.time() + warte

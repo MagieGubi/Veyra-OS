@@ -1,12 +1,18 @@
-# Metapaket (VPKG 0.6): keine eigenen Dateien, zieht die Pakete der Gruppe @veyra-recovery nach.
-# Gruppe installieren: vpkg install veyra-recovery (dieses Paket) oder vpkg install @veyra-recovery.
+# Rettungswerkzeug und Metapaket der Gruppe @veyra-recovery (VPKG 0.6): veyra-recovery
+# findet installierte Systeme, prueft und repariert sie von der Live-ISO aus. veyra-recovery
+# liegt neben diesem Rezept; bei jeder Aenderung daran muss sha256sums angepasst werden
+# (tests/recovery/recovery-test.sh prueft das).
 pkgname=veyra-recovery
-pkgver=0.6
+pkgver=0.6.1
 pkgrel=1
-pkgdesc="Werkzeuge zur Reparatur (Metapaket)"
+pkgdesc="Rettungswerkzeug: installiertes Veyra pruefen und reparieren (und Metapaket der Gruppe)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-recovery)
-depends=(e2fsprogs util-linux coreutils kbd less vpkg veyra-installer veyra-boot)
+sources=(veyra-recovery)
+sha256sums=(9b79fa94c5dd0b37e2223a4fbcc809929cfa3ec21714d1b1a8153eed8d048b11)
+depends=(python systemd e2fsprogs util-linux coreutils kbd less vpkg veyra-installer veyra-konten veyra-boot)
 
-package() { :; }
+package() {
+  install -Dm755 "$srcdir/veyra-recovery" "$pkgdir/usr/bin/veyra-recovery"
+}

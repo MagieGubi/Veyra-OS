@@ -1,0 +1,668 @@
+#!/usr/bin/env python3
+"""veyra-recovery: ein installiertes Veyra von der Live-ISO aus pruefen und reparieren.
+
+  veyra-recovery liste                       installierte Veyra-Systeme finden
+  veyra-recovery pruefe GERAET               nur pruefen, nichts aendern
+  veyra-recovery repariere GERAET            Dateisystem, Pakete und Booteintraege reparieren
+  veyra-recovery kernel GERAET liste         eingetragene Kernel und ihr Zustand
+  veyra-recovery kernel GERAET zurueck       den Standard-Kernel als schlecht markieren,
+                                             der vorige gute startet wieder
+  veyra-recovery kernel GERAET entferne VERSION
+  veyra-recovery logs GERAET [--alle]        Warnungen und Fehler des letzten Starts
+
+GERAET ist die Platte (/dev/nvme0n1, /dev/vda) oder die Partition veyra-root darauf.
+Schreibende Befehle fragen nach dem Geraetenamen (oder --bestaetigt GERAET) und lehnen ein
+eingehaengtes System ab, also auch das gerade laufende.
+
+Was repariere tut, in dieser Reihenfolge:
+  1. e2fsck auf der Root-Partition (nicht eingehaengt)
+  2. vpkg recover: einen unterbrochenen Paketvorgang zuruecknehmen
+  3. Paketdateien, die fehlen oder veraendert sind, aus dem Live-System zurueckholen, wenn
+     dort genau die Datei liegt, die das Paket verlangt (gleiche SHA-256); geaenderte
+     Konfiguration unter /etc bleibt unangetastet
+  4. EFI-Systempartition: systemd-boot, loader.conf, Booteintraege (Kernel vorhanden und
+     gueltig, root=PARTUUID der eigenen Partition); nicht reparierbare Eintraege werden
+     als schlecht markiert, fehlt ein Eintrag fuer den installierten Kernel, kommt er neu
+  5. Konten pruefen (veyra-kontencheck); Konten aendert recovery nicht
+"""
+import argparse
+import contextlib
+import hashlib
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import tomllib
+
+LIVE_QUELLE = "/run/veyra-live/sfs"
+ARBEIT = "/run/veyra-recovery"
+ROOT_NAME = "veyra-root"
+ESP_TYP = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+SD_BOOT = "usr/lib/systemd/boot/efi/systemd-bootx64.efi"
+DB = "var/lib/vpkg/installed"
+VERSUCHE = 3
+EINTRAG_RE = re.compile(r"^veyra-(?P<v>[0-9][0-9A-Za-z._~-]*?)(?:\+(?P<links>\d+)(?:-(?P<versucht>\d+))?)?\.conf$")
+LOADER_CONF = b"timeout 3\ndefault veyra-*\neditor no\n"
+
+
+class Fehler(Exception):
+    pass
+
+
+class Befund:
+    """Ein gefundenes Problem; reparatur() behebt es (None: nicht automatisch moeglich)."""
+
+    def __init__(self, text, reparatur=None, hinweis=""):
+        self.text, self.reparatur, self.hinweis = text, reparatur, hinweis
+
+
+def lauf(cmd, pruefen=True):
+    try:
+        r = subprocess.run(cmd, text=True, capture_output=True)
+    except FileNotFoundError:
+        raise Fehler(f"Programm fehlt: {cmd[0]}") from None
+    if pruefen and r.returncode != 0:
+        raise Fehler(f"{' '.join(cmd)} fehlgeschlagen: {(r.stderr or r.stdout).strip()}")
+    return r
+
+
+def sha256(pfad):
+    h = hashlib.sha256()
+    with open(pfad, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def schreibe(pfad, daten):
+    """Fuer die EFI-Partition (FAT kennt keine Rechte): erst .neu, dann umbenennen."""
+    os.makedirs(os.path.dirname(pfad), exist_ok=True)
+    neu = pfad + ".neu"
+    with open(neu, "wb") as f:
+        f.write(daten)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(neu, pfad)
+
+
+def kernel_fehler(pfad):
+    """None, wenn PFAD ein Linux-Kernel mit EFI-Stub ist, sonst der Grund."""
+    try:
+        groesse = os.path.getsize(pfad)
+        with open(pfad, "rb") as f:
+            kopf = f.read(4096)
+    except OSError:
+        return "fehlt"
+    if not 1 << 20 <= groesse <= 256 << 20:
+        return f"unplausible Groesse ({groesse} Bytes)"
+    if kopf[:2] != b"MZ":
+        return "kein EFI-Programm"
+    pe = struct.unpack_from("<I", kopf, 0x3C)[0]
+    if pe + 4 > len(kopf) or kopf[pe:pe + 4] != b"PE\0\0":
+        return "kein EFI-Programm"
+    if kopf[0x202:0x206] != b"HdrS":
+        return "kein Linux-Kernel"
+    return None
+
+
+def efi_fehler(pfad):
+    try:
+        with open(pfad, "rb") as f:
+            kopf = f.read(4096)
+    except OSError:
+        return "fehlt"
+    if kopf[:2] != b"MZ" or len(kopf) < 0x40:
+        return "kein EFI-Programm"
+    pe = struct.unpack_from("<I", kopf, 0x3C)[0]
+    if pe + 4 > len(kopf) or kopf[pe:pe + 4] != b"PE\0\0":
+        return "kein EFI-Programm"
+    return None
+
+
+# ---------------------------------------------------------------- Pakete
+
+def manifeste(root):
+    d = os.path.join(root, DB)
+    out = {}
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        mf = os.path.join(d, n, "manifest.toml")
+        if os.path.isfile(mf):
+            with open(mf, "rb") as f:
+                out[n] = tomllib.load(f)
+    return out
+
+
+def _hole_datei(quelle_pfad, ziel_pfad, modus):
+    def rep():
+        os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)
+        neu = ziel_pfad + ".veyra-recovery"
+        if os.path.lexists(neu):
+            os.unlink(neu)
+        shutil.copyfile(quelle_pfad, neu, follow_symlinks=False)
+        os.chown(neu, 0, 0)
+        os.chmod(neu, modus)
+        if os.path.isdir(ziel_pfad) and not os.path.islink(ziel_pfad):
+            raise Fehler(f"{ziel_pfad} ist ein Verzeichnis, nicht ersetzt")
+        os.replace(neu, ziel_pfad)
+    return rep
+
+
+def _hole_link(ziel, ziel_pfad):
+    def rep():
+        os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)
+        neu = ziel_pfad + ".veyra-recovery"
+        if os.path.lexists(neu):
+            os.unlink(neu)
+        os.symlink(ziel, neu)
+        if os.path.isdir(ziel_pfad) and not os.path.islink(ziel_pfad):
+            raise Fehler(f"{ziel_pfad} ist ein Verzeichnis, nicht ersetzt")
+        os.replace(neu, ziel_pfad)
+    return rep
+
+
+def _lege_verzeichnis_an(ziel_pfad, modus):
+    def rep():
+        os.makedirs(ziel_pfad, exist_ok=True)
+        os.chmod(ziel_pfad, modus)
+    return rep
+
+
+def paket_befunde(root, quelle):
+    """Fehlende oder veraenderte Paketdateien (ohne Konfiguration unter /etc)."""
+    befunde = []
+    for name, m in manifeste(root).items():
+        for e in m.get("file", []):
+            rel = e["path"].lstrip("/")
+            if rel.startswith("etc/") and e["type"] == "file":
+                continue           # Konfiguration darf sich aendern
+            dst = os.path.join(root, rel)
+            src = os.path.join(quelle, rel) if quelle else None
+            modus = int(str(e.get("mode", "644")), 8)
+            if e["type"] == "dir":
+                if not os.path.isdir(dst) and not (rel == "run" or rel.startswith("run/")):
+                    befunde.append(Befund(f"{name}: Verzeichnis fehlt: /{rel}",
+                                          _lege_verzeichnis_an(dst, modus)))
+                continue
+            if e["type"] == "symlink":
+                if not os.path.islink(dst) or os.readlink(dst) != e["target"]:
+                    befunde.append(Befund(f"{name}: Link fehlt oder zeigt woanders hin: /{rel}",
+                                          _hole_link(e["target"], dst)))
+                continue
+            if os.path.isfile(dst) and not os.path.islink(dst):
+                if sha256(dst) == e["sha256"]:
+                    continue
+                text = f"{name}: Inhalt veraendert: /{rel}"
+            else:
+                text = f"{name}: Datei fehlt: /{rel}"
+            if src and os.path.isfile(src) and not os.path.islink(src) and sha256(src) == e["sha256"]:
+                befunde.append(Befund(text, _hole_datei(src, dst, modus)))
+            else:
+                befunde.append(Befund(text, None, f"im Live-System liegt diese Datei nicht in der "
+                                      f"Version von {name}: Paket {name} neu installieren"))
+    return befunde
+
+
+# ---------------------------------------------------------------- Boot
+
+def eintraege(esp):
+    d = os.path.join(esp, "loader/entries")
+    out = []
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        m = EINTRAG_RE.match(n)
+        if m:
+            links = m.group("links")
+            out.append({"datei": n, "version": m.group("v"),
+                        "zustand": "gut" if links is None else ("schlecht" if links == "0" else "ungeprueft")})
+    return out
+
+
+def lies_eintrag(pfad):
+    werte = {}
+    with open(pfad, encoding="utf-8", errors="replace") as f:
+        for z in f:
+            z = z.strip()
+            if z and not z.startswith("#"):
+                k, _, v = z.partition(" ")
+                werte[k] = v.strip()
+    return werte
+
+
+def eintrag_text(version, optionen, titel="Veyra OS"):
+    return (f"title      {titel}\nversion    {version}\nsort-key   veyra\n"
+            f"linux      /veyra/{version}/linux\noptions    {optionen}\n").encode()
+
+
+def installierte_kernel(root):
+    """{Version: Pfad} der Kernel im Zielsystem (usr/lib/modules/VERSION/vmlinuz)."""
+    d = os.path.join(root, "usr/lib/modules")
+    out = {}
+    for v in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        k = os.path.join(d, v, "vmlinuz")
+        if os.path.isfile(k) and kernel_fehler(k) is None:
+            out[v] = k
+    return out
+
+
+def bootweg(esp):
+    if os.path.isdir(os.path.join(esp, "loader")):
+        return "systemd-boot"
+    if kernel_fehler(os.path.join(esp, "EFI/BOOT/BOOTX64.EFI")) is None:
+        return "direkt"
+    return "systemd-boot"    # nichts Brauchbares da: der Standardweg seit 0.6 wird eingerichtet
+
+
+def _kopiere(src, dst):
+    def rep():
+        with open(src, "rb") as f:
+            schreibe(dst, f.read())
+    return rep
+
+
+def _schreibe(dst, daten):
+    return lambda: schreibe(dst, daten)
+
+
+def _benenne_um(alt, neu):
+    return lambda: os.replace(alt, neu)
+
+
+def neue_optionen(alt, partuuid):
+    """Optionen mit root=PARTUUID der eigenen Partition; Angaben, die einen Start nur
+    verzoegern oder verhindern (rootwait=, panic=), entfallen."""
+    teile = [t for t in alt.split() if not re.match(r"(root|rootwait|panic)=", t)]
+    teile = [t for t in teile if t not in ("rw", "ro")]
+    return " ".join([f"root=PARTUUID={partuuid}", "rw"] + teile)
+
+
+def boot_befunde(esp, root, partuuid):
+    befunde = []
+    kerne = installierte_kernel(root)
+    weg = bootweg(esp)
+    if weg == "direkt":
+        k = os.path.join(esp, "EFI/BOOT/BOOTX64.EFI")
+        if kernel_fehler(k) and kerne:
+            v, pfad = sorted(kerne.items())[-1]
+            befunde.append(Befund(f"EFI/BOOT/BOOTX64.EFI: {kernel_fehler(k)}", _kopiere(pfad, k)))
+        return befunde
+
+    sdb = os.path.join(root, SD_BOOT)
+    for rel in ("EFI/BOOT/BOOTX64.EFI", "EFI/systemd/systemd-bootx64.efi"):
+        grund = efi_fehler(os.path.join(esp, rel))
+        if grund:
+            if os.path.isfile(sdb):
+                befunde.append(Befund(f"{rel}: {grund}", _kopiere(sdb, os.path.join(esp, rel))))
+            else:
+                befunde.append(Befund(f"{rel}: {grund}", None, "systemd-boot fehlt auch im Zielsystem"))
+    lc = os.path.join(esp, "loader/loader.conf")
+    if not os.path.isfile(lc):
+        befunde.append(Befund("loader/loader.conf fehlt", _schreibe(lc, LOADER_CONF)))
+
+    d = os.path.join(esp, "loader/entries")
+    for e in eintraege(esp):
+        pfad = os.path.join(d, e["datei"])
+        w = lies_eintrag(pfad)
+        v = e["version"]
+        probleme, linux_neu = [], None
+        linux = w.get("linux", "")
+        kpfad = os.path.join(esp, linux.lstrip("/")) if linux else ""
+        grund = kernel_fehler(kpfad) if kpfad else "keine linux-Zeile"
+        if grund:
+            if v in kerne:
+                linux_neu = kerne[v]
+                probleme.append(f"Kernel {linux or '?'}: {grund}")
+            else:
+                if e["zustand"] != "schlecht":
+                    neu = os.path.join(d, f"veyra-{v}+0.conf")
+                    befunde.append(Befund(f"Eintrag {e['datei']}: Kernel {linux or '?'} {grund}, "
+                                          f"im Zielsystem gibt es Kernel {v} nicht: als schlecht markiert",
+                                          _benenne_um(pfad, neu)))
+                continue
+        opt = w.get("options", "")
+        roots = re.findall(r"(?:^|\s)root=(\S+)", opt)
+        if not roots or roots[-1].lower() != f"partuuid={partuuid}":
+            probleme.append(f"root={roots[-1] if roots else '(fehlt)'} statt PARTUUID={partuuid}")
+            opt = neue_optionen(opt, partuuid)
+        if probleme:
+            # Repariert gilt der Eintrag als ungeprueft: systemd-boot zaehlt wieder mit.
+            name = f"veyra-{v}+{VERSUCHE}.conf"
+
+            def rep(pfad=pfad, v=v, opt=opt, linux_neu=linux_neu, titel=w.get("title", "Veyra OS"),
+                    name=name):
+                if linux_neu:
+                    _kopiere(linux_neu, os.path.join(esp, "veyra", v, "linux"))()
+                schreibe(os.path.join(d, name), eintrag_text(v, opt, titel))
+                if os.path.basename(pfad) != name:
+                    os.unlink(pfad)
+            befunde.append(Befund(f"Eintrag {e['datei']}: " + "; ".join(probleme), rep))
+
+    vorhanden = {e["version"] for e in eintraege(esp)}
+    for v, pfad in sorted(kerne.items()):
+        if v in vorhanden:
+            continue
+        opt = f"root=PARTUUID={partuuid} rw"
+        befunde.append(Befund(f"kein Booteintrag fuer den installierten Kernel {v}",
+                              _alle(_kopiere(pfad, os.path.join(esp, "veyra", v, "linux")),
+                                    _schreibe(os.path.join(d, f"veyra-{v}+{VERSUCHE}.conf"),
+                                              eintrag_text(v, opt)))))
+    return befunde
+
+
+def _alle(*fs):
+    def rep():
+        for f in fs:
+            f()
+    return rep
+
+
+# ---------------------------------------------------------------- Datentraeger
+
+def blkid(geraet):
+    r = lauf(["blkid", "-p", "-o", "export", geraet], pruefen=False)
+    werte = {}
+    for z in r.stdout.splitlines():
+        k, _, v = z.partition("=")
+        werte[k] = v
+    return werte
+
+
+def partitionen():
+    out = []
+    for n in sorted(os.listdir("/sys/class/block")):
+        p = os.path.realpath(f"/sys/class/block/{n}")
+        if not os.path.exists(os.path.join(p, "partition")) or n.startswith(("loop", "sr")):
+            continue
+        w = blkid(f"/dev/{n}")
+        out.append({"pfad": f"/dev/{n}", "platte": "/dev/" + os.path.basename(os.path.dirname(p)),
+                    "name": w.get("PART_ENTRY_NAME", ""), "uuid": w.get("PART_ENTRY_UUID", "").lower(),
+                    "typ": w.get("PART_ENTRY_TYPE", "").lower(), "fs": w.get("TYPE", "")})
+    return out
+
+
+def zielsystem(geraet):
+    geraet = os.path.realpath(geraet)
+    teile = partitionen()
+    roots = [t for t in teile if t["name"] == ROOT_NAME and geraet in (t["pfad"], t["platte"])]
+    if not roots:
+        raise Fehler(f"auf {geraet} gibt es keine Partition {ROOT_NAME} (veyra-recovery liste)")
+    if len(roots) > 1:
+        raise Fehler(f"auf {geraet} gibt es mehrere Partitionen {ROOT_NAME}: "
+                     + ", ".join(t["pfad"] for t in roots) + "; eine davon angeben")
+    r = roots[0]
+    esps = [t for t in teile if t["platte"] == r["platte"] and t["typ"] == ESP_TYP]
+    return {"root": r["pfad"], "platte": r["platte"], "partuuid": r["uuid"],
+            "esp": esps[0]["pfad"] if esps else None, "fs": r["fs"]}
+
+
+def ist_eingehaengt(geraet):
+    st = os.stat(geraet)
+    mm = f"{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}"
+    with open("/proc/self/mountinfo") as f:
+        return any(z.split()[2] == mm for z in f)
+
+
+@contextlib.contextmanager
+def eingehaengt(ziel, schreiben):
+    for g in (ziel["root"], ziel["esp"]):
+        if g and ist_eingehaengt(g):
+            raise Fehler(f"{g} ist eingehaengt (laeuft dieses System gerade davon?); "
+                         "recovery arbeitet nur mit nicht eingehaengten Systemen")
+    os.makedirs(ARBEIT, exist_ok=True)
+    root = tempfile.mkdtemp(prefix="ziel.", dir=ARBEIT)
+    esp = tempfile.mkdtemp(prefix="esp.", dir=ARBEIT)
+    haengt = []
+    try:
+        lauf(["mount", "-t", "ext4", "-o", "rw" if schreiben else "ro,noload", ziel["root"], root])
+        haengt.append(root)
+        if ziel["esp"]:
+            lauf(["mount", "-t", "vfat", "-o", ("rw" if schreiben else "ro") + ",umask=0077",
+                  ziel["esp"], esp])
+            haengt.append(esp)
+        yield root, (esp if ziel["esp"] else None)
+    finally:
+        os.sync()
+        for d in reversed(haengt):
+            subprocess.run(["umount", d], capture_output=True)
+        for d in (root, esp):
+            with contextlib.suppress(OSError):
+                os.rmdir(d)
+
+
+def bestaetige(args):
+    if args.bestaetigt is not None:
+        if args.bestaetigt != args.geraet:
+            raise Fehler(f"--bestaetigt {args.bestaetigt} passt nicht zu {args.geraet}: nichts geaendert")
+        return
+    try:
+        a = input(f"Zum Bestaetigen den Geraetenamen eintippen ({args.geraet}): ").strip()
+    except EOFError:
+        a = ""
+    if a != args.geraet:
+        raise Fehler("nicht bestaetigt: nichts geaendert")
+
+
+# ---------------------------------------------------------------- Befehle
+
+def zeige_ziel(ziel):
+    print(f"Veyra auf {ziel['platte']}: Root {ziel['root']} (PARTUUID {ziel['partuuid']}), "
+          f"EFI-Systempartition {ziel['esp'] or 'fehlt'}")
+
+
+def konten(root):
+    r = lauf(["bash", "/usr/bin/veyra-kontencheck", "--root", root], pruefen=False)
+    fehler = [z for z in r.stdout.splitlines() if z.startswith("FEHLER")]
+    return fehler
+
+
+def vpkg_befehl(root, *args):
+    return lauf([sys.executable, "/usr/bin/vpkg", "--root", root, *args], pruefen=False)
+
+
+def cmd_liste(_args):
+    teile = partitionen()
+    roots = [t for t in teile if t["name"] == ROOT_NAME]
+    if not roots:
+        print("Kein installiertes Veyra gefunden (keine Partition veyra-root).")
+        return 1
+    for r in roots:
+        esp = next((t["pfad"] for t in teile if t["platte"] == r["platte"] and t["typ"] == ESP_TYP), "fehlt")
+        print(f"{r['platte']}: Root {r['pfad']} ({r['fs'] or 'unbekannt'}), "
+              f"PARTUUID {r['uuid']}, EFI-Systempartition {esp}")
+    return 0
+
+
+def pruefe_eingehaengt(root, esp, ziel, quelle):
+    """Alle Befunde eines eingehaengten Zielsystems."""
+    befunde = []
+    if not os.path.isdir(os.path.join(root, DB)):
+        raise Fehler(f"{ziel['root']} enthaelt kein Veyra (keine VPKG-Datenbank)")
+    if os.path.isfile(os.path.join(root, "var/lib/vpkg/txn/journal")):
+        befunde.append(Befund("unterbrochener Paketvorgang (vpkg recover noetig)",
+                              lambda: _vpkg_recover(root)))
+    befunde += paket_befunde(root, quelle)
+    if esp:
+        befunde += boot_befunde(esp, root, ziel["partuuid"])
+    else:
+        befunde.append(Befund("keine EFI-Systempartition auf der Platte", None,
+                              "neu installieren oder die Partition von Hand anlegen"))
+    return befunde
+
+
+def _vpkg_recover(root):
+    r = vpkg_befehl(root, "recover")
+    if r.returncode != 0:
+        raise Fehler(f"vpkg recover: {(r.stderr or r.stdout).strip()}")
+
+
+def cmd_pruefe(args):
+    ziel = zielsystem(args.geraet)
+    zeige_ziel(ziel)
+    befunde = []
+    r = lauf(["e2fsck", "-f", "-n", ziel["root"]], pruefen=False)
+    if r.returncode != 0:
+        befunde.append(Befund(f"Dateisystem von {ziel['root']} hat Fehler (e2fsck)", True))
+    with eingehaengt(ziel, schreiben=False) as (root, esp):
+        befunde += pruefe_eingehaengt(root, esp, ziel, args.quelle)
+        kf = konten(root)
+    for b in befunde:
+        print(f"PROBLEM: {b.text}" + ("" if b.reparatur else f" ({b.hinweis or 'nicht automatisch reparierbar'})"))
+    for z in kf:
+        print(f"KONTEN: {z}")
+    if not befunde and not kf:
+        print("Keine Probleme gefunden.")
+        return 0
+    n = sum(1 for b in befunde if b.reparatur)
+    print(f"{len(befunde) + len(kf)} Problem(e), davon {n} mit veyra-recovery repariere behebbar.")
+    return 1
+
+
+def frueh_bestaetigt(args):
+    """Eine falsche --bestaetigt-Angabe bricht ab, bevor irgendetwas angesehen wird."""
+    if args.bestaetigt is not None and args.bestaetigt != args.geraet:
+        raise Fehler(f"--bestaetigt {args.bestaetigt} passt nicht zu {args.geraet}: nichts geaendert")
+
+
+def cmd_repariere(args):
+    frueh_bestaetigt(args)
+    ziel = zielsystem(args.geraet)
+    zeige_ziel(ziel)
+    bestaetige(args)
+    print(">> Dateisystem pruefen und reparieren (e2fsck)")
+    r = lauf(["e2fsck", "-f", "-y", ziel["root"]], pruefen=False)
+    if r.returncode >= 4:
+        print(r.stdout)
+        raise Fehler(f"e2fsck konnte {ziel['root']} nicht reparieren (Code {r.returncode})")
+    print("   repariert" if r.returncode in (1, 2) else "   in Ordnung")
+    offen = []
+    with eingehaengt(ziel, schreiben=True) as (root, esp):
+        print(">> Unterbrochene Paketvorgaenge (vpkg recover)")
+        _vpkg_recover(root)
+        print(">> Paketdateien und Booteintraege pruefen")
+        for b in pruefe_eingehaengt(root, esp, ziel, args.quelle):
+            if b.reparatur is None:
+                print(f"   NICHT REPARIERT: {b.text} ({b.hinweis})")
+                offen.append(b)
+                continue
+            try:
+                b.reparatur()
+                print(f"   repariert: {b.text}")
+            except (Fehler, OSError) as e:
+                print(f"   NICHT REPARIERT: {b.text} ({e})")
+                offen.append(b)
+        print(">> Gegenprobe")
+        rest = pruefe_eingehaengt(root, esp, ziel, args.quelle)
+        c = vpkg_befehl(root, "check")
+        print("   " + (c.stdout.strip().splitlines() or ["vpkg check ohne Ausgabe"])[-1])
+        print(">> Konten pruefen (veyra-kontencheck)")
+        kf = konten(root)
+        for z in kf:
+            print(f"   {z}")
+        if kf:
+            print("   Konten aendert veyra-recovery nicht; Passwoerter neu setzen mit: "
+                  "veyra-einrichtung --root (Zielsystem eingehaengt)")
+        if esp:
+            print(">> Booteintraege jetzt")
+            for e in eintraege(esp):
+                print(f"   {e['datei']:<40} {e['zustand']}")
+    if rest or kf:
+        for b in rest:
+            print(f"OFFEN: {b.text}")
+        print(f"Reparatur unvollstaendig: {len(rest) + len(kf)} Problem(e) offen.")
+        return 1
+    print(f"Reparatur fertig: {ziel['platte']} sollte wieder starten.")
+    return 0
+
+
+def cmd_kernel(args):
+    frueh_bestaetigt(args)
+    ziel = zielsystem(args.geraet)
+    if not ziel["esp"]:
+        raise Fehler("keine EFI-Systempartition auf der Platte")
+    if args.aktion != "liste":
+        bestaetige(args)
+    with eingehaengt(ziel, schreiben=args.aktion != "liste") as (_root, esp):
+        ku = [sys.executable, "/usr/bin/veyra-kernel-update", "--esp", esp, "--gebootet", "-"]
+        if args.aktion == "liste":
+            return subprocess.run(ku + ["liste"]).returncode
+        if args.aktion == "entferne":
+            if not args.version:
+                raise Fehler("entferne braucht eine VERSION")
+            return subprocess.run(ku + ["entferne", args.version]).returncode
+        neu, alt = zurueck(esp)
+        print(f"Kernel {neu} als schlecht markiert; beim naechsten Start laeuft {alt}.")
+        return 0
+
+
+def zurueck(esp):
+    """Markiert den Eintrag, den systemd-boot jetzt waehlen wuerde, als schlecht."""
+    kandidaten = [e for e in eintraege(esp) if e["zustand"] != "schlecht"]
+    kandidaten.sort(key=lambda e: [(0, int(t), "") if t.isdigit() else (1, 0, t)
+                                   for t in re.findall(r"\d+|[A-Za-z]+", e["version"])], reverse=True)
+    if len(kandidaten) < 2:
+        raise Fehler("es gibt keinen weiteren Kernel, auf den zurueckgefallen werden kann")
+    neu, alt = kandidaten[0], kandidaten[1]
+    d = os.path.join(esp, "loader/entries")
+    os.replace(os.path.join(d, neu["datei"]), os.path.join(d, f"veyra-{neu['version']}+0.conf"))
+    return neu["version"], alt["version"]
+
+
+def cmd_logs(args):
+    ziel = zielsystem(args.geraet)
+    with eingehaengt(ziel, schreiben=False) as (root, _esp):
+        j = os.path.join(root, "var/log/journal")
+        if not os.path.isdir(j) or not any(os.scandir(j)):
+            print("Kein dauerhaftes Journal im Zielsystem (/var/log/journal fehlt oder ist leer).")
+            return 1
+        r = lauf(["journalctl", "-D", j, "--no-pager", "--list-boots"], pruefen=False)
+        zeilen = r.stdout.strip().splitlines()
+        print("Letzte Starts laut Journal:")
+        for z in zeilen[-5:]:
+            print(f"  {z}")
+        if not zeilen:
+            return 1
+        cmd = ["journalctl", "-D", j, "--no-pager", "-b", "-0", "-n", "200"]
+        if not args.alle:
+            cmd += ["-p", "warning"]
+        print("Letzter Start" + ("" if args.alle else ", Warnungen und Fehler") + ":")
+        sys.stdout.flush()
+        return subprocess.run(cmd).returncode
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="veyra-recovery", description=__doc__.split("\n")[0],
+                                 epilog="\n".join(__doc__.split("\n")[2:]),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="befehl", required=True)
+    sub.add_parser("liste", help="installierte Veyra-Systeme finden")
+    p = sub.add_parser("pruefe", help="nur pruefen")
+    p.add_argument("geraet")
+    p.add_argument("--quelle", default=LIVE_QUELLE, help=argparse.SUPPRESS)
+    p = sub.add_parser("repariere", help="reparieren")
+    p.add_argument("geraet")
+    p.add_argument("--bestaetigt")
+    p.add_argument("--quelle", default=LIVE_QUELLE, help="unveraendertes Veyra-System als Vorlage "
+                   "fuer Paketdateien (Standard: das Live-System)")
+    p = sub.add_parser("kernel", help="Kernel-Rueckfall")
+    p.add_argument("geraet")
+    p.add_argument("aktion", choices=("liste", "zurueck", "entferne"))
+    p.add_argument("version", nargs="?")
+    p.add_argument("--bestaetigt")
+    p = sub.add_parser("logs", help="Journal des letzten Starts")
+    p.add_argument("geraet")
+    p.add_argument("--alle", action="store_true", help="alle Meldungen, nicht nur Warnungen")
+    a = ap.parse_args(argv)
+    if a.befehl != "liste" and os.geteuid() != 0:
+        print("veyra-recovery: braucht root", file=sys.stderr)
+        return 1
+    try:
+        return {"liste": cmd_liste, "pruefe": cmd_pruefe, "repariere": cmd_repariere,
+                "kernel": cmd_kernel, "logs": cmd_logs}[a.befehl](a)
+    except (Fehler, OSError) as e:
+        print(f"veyra-recovery: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

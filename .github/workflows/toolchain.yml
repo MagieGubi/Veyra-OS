@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-installer/veyra-rootpruefung
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -33,7 +33,7 @@ jobs:
       - name: Firewall-Regeln testen
         run: sudo apt-get install -y nftables && sudo bash tests/firewall/firewall-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
-        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh
+        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh && bash tests/recovery/recovery-test.sh
       - name: Konten testen (Ersteinrichtung, Kontenpruefung)
         run: sudo bash tests/konten/konten-test.sh
       - name: Abbild-Varianten testen (dev und test, mit Probe-System)
@@ -718,10 +718,10 @@ jobs:
           retention-days: 7
 
   live-iso:
-    name: Live-ISO und Boot-Test von CD
+    name: Live-ISO, Boot-Test von CD und Recovery
     needs: [image, kernel-reproducible]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
 
@@ -744,9 +744,27 @@ jobs:
           name: kernel-a
           path: k
 
+      # Fuer den Recovery-Test: dasselbe Abbild wie im Job image auf eine leere virtuelle
+      # Platte installieren, bevor build-iso.sh das Abbild fuer den Live-Betrieb anpasst.
+      - name: Abbild entpacken und auf leere virtuelle Platte installieren
+        run: |
+          set -o pipefail
+          zstd -q -d --rm img/veyra-0.5.img.zst -o veyra-0.5.img
+          read -r start size < <(sfdisk -J veyra-0.5.img | python3 -c '
+          import json, sys
+          p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
+          print(p["start"] * 512, p["size"] * 512)')
+          loop=$(sudo losetup --find --show --read-only --offset "$start" --sizelimit "$size" veyra-0.5.img)
+          sudo mkdir -p /mnt/quelle
+          sudo mount -o ro "$loop" /mnt/quelle
+          truncate -s 8G rettung.img
+          sudo packages/base/veyra-installer/veyra-install installiere "$PWD/rettung.img" \
+            --quelle /mnt/quelle --mit-selbsttest --bestaetigt "$PWD/rettung.img" | tee installer.log
+          sudo umount /mnt/quelle
+          sudo losetup -d "$loop"
+
       - name: ISO bauen
         run: |
-          zstd -q -d --rm img/veyra-0.5.img.zst -o veyra-0.5.img
           sudo image/build-iso.sh veyra-0.5.img k/kernel veyra-0.5-live.iso
           sudo chown "$(id -u):$(id -g)" veyra-0.5-live.iso
           rm -f veyra-0.5.img
@@ -754,6 +772,13 @@ jobs:
 
       - name: Boot-Test von CD (UEFI) und Selbsttest
         run: SELFTEST=1 MEDIUM=cdrom image/boot-test.sh veyra-0.5-live.iso boot-live.log 600
+
+      # Recovery (0.6 Phase 4): Platte absichtlich beschaedigen (Booteintrag, Paketdatei),
+      # von der Live-ISO aus mit veyra-recovery reparieren, danach startet sie wieder.
+      - name: Recovery-Test (beschaedigte Platte, Reparatur von der Live-ISO)
+        run: |
+          python3 image/recovery-test.py rettung.img veyra-0.5-live.iso recovery-logs
+          rm -f rettung.img
 
       - uses: actions/upload-artifact@v6
         if: always()
@@ -764,3 +789,12 @@ jobs:
             SHA256SUMS
             boot-live.log
           retention-days: 7
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: veyra-recovery-test
+          path: |
+            installer.log
+            recovery-logs
+          retention-days: 7
+          if-no-files-found: ignore
