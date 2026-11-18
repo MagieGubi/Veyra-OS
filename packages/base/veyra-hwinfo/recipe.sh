@@ -9,7 +9,7 @@ license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-base)
 sources=(veyra-hwinfo)
-sha256sums=(e85ccbe04198a18de9e8622b518f36212b3d844d0b08d38f71789e47d4e685da)
+sha256sums=(7649ea31e66797e2aa45e76501d03c6c4624dda4417896656826ed8899495a85)
 depends=(python)
 
 package() {

@@ -559,13 +559,16 @@ jobs:
           pattern: pakete-4b-*
           path: basis
 
-      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, veyra-zertifikate, veyra-sicherheit, veyra-firewall, Metapakete, vpkg, Selbsttest)
+      - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, veyra-zertifikate, veyra-sicherheit, veyra-firewall, Metapakete, vpkg, Selbsttest, Firmware)
         run: |
           build/scripts/fetch-extra.sh "$RUNNER_TEMP/quellen"
           for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/veyra-zertifikate packages/base/veyra-sicherheit packages/base/veyra-firewall packages/base/veyra-base packages/base/veyra-network packages/base/veyra-security packages/base/veyra-development packages/base/veyra-recovery packages/base/veyra-boot packages/base/veyra-hwinfo packages/base/vpkg packages/test/veyra-selftest; do
             build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir extra "$r"
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
+          # Hardwareabhaengig (Firmware): nicht im VM-Abbild, aber im Repository und im
+          # Testabbild fuer echte Rechner (build-image.sh liest nur extra/ selbst).
+          build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir extra/hardware packages/base/veyra-firmware-intel-wlan
 
       - name: Pakete signieren (wenn das Secret VPKG_SIGNING_KEY eingerichtet ist)
         env:
@@ -696,6 +699,7 @@ jobs:
         if: success()
         run: |
           rm -f veyra-0.5.img veyra-0.5.vdi
+          cp extra/hardware/*.vpkg* extra/
           sudo VARIANTE=test image/build-image.sh sys/veyra-stage4b-4.tar.zst k/kernel extra veyra-0.5-test.img basis
           sudo chown "$(id -u):$(id -g)" veyra-0.5-test.img
       - name: Boot-Test des Testabbilds und Selbsttest

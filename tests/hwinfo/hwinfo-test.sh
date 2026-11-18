@@ -110,4 +110,12 @@ PY
 if grep -rq 'GEHEIM\|aa:bb:cc' "$t/text" "$t/json"; then fail "Seriennummer oder MAC-Adresse ausgegeben"; fi
 ok "JSON vollstaendig; keine Seriennummern und MAC-Adressen in Text und JSON"
 
+n=$((n + 1))
+grep -q 'Intel-WLAN ohne Firmware: vpkg install veyra-firmware-intel-wlan' "$t/text" || fail "Hinweis auf das Firmware-Paket fehlt"
+grep -q 'NVIDIA-Grafik ohne Treiber' "$t/text" || fail "Hinweis zur NVIDIA-Grafik fehlt"
+mkdir -p "$t/r/usr/lib/firmware" && touch "$t/r/usr/lib/firmware/iwlwifi-so-a0-gf-a0-89.ucode"
+hw > "$t/text2"
+grep -q 'Firmware ist da, aber der Treiber iwlwifi ist nicht geladen' "$t/text2" || fail "Hinweis bei vorhandener Firmware falsch"
+ok "Hinweise: Firmware-Paket fuer Intel-WLAN, Treiber fehlt trotz Firmware, NVIDIA"
+
 echo "Alle $n Hardware-Tests bestanden."

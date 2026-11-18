@@ -208,16 +208,33 @@ def audio(s, pci_liste):
     return {"pci": [p for p in pci_liste if p["klasse"].startswith("04")], "karten": karten}
 
 
+def hinweise(s, h):
+    """Was der Benutzer tun kann; veyra-hwinfo selbst installiert und aktiviert nichts."""
+    out = []
+    intel_wlan = [x for x in h["wlan"]["pci"] if x["id"].startswith("8086:")]
+    if intel_wlan and not h["wlan"]["geraete"]:
+        if not s.liste("/usr/lib/firmware/iwlwifi-*.ucode"):
+            out.append("Intel-WLAN ohne Firmware: vpkg install veyra-firmware-intel-wlan, danach neu starten")
+        elif not any(x["treiber"] for x in intel_wlan):
+            out.append("Intel-WLAN: Firmware ist da, aber der Treiber iwlwifi ist nicht geladen "
+                       "(Meldungen: dmesg | grep iwlwifi)")
+    if any(x["id"].startswith("10de:") and not x["treiber"] for x in h["grafik"]["pci"]):
+        out.append("NVIDIA-Grafik ohne Treiber: Veyra nutzt vorerst die Intel-Grafik")
+    return out
+
+
 def erfasse(root="/"):
     s = Sys(root)
     p = pci(s)
     net = netzwerk(s)
     ohne = [x for x in p if not x["treiber"] and not x["klasse"].startswith("06")]
     wlan_pci = [x for x in p if x["klasse"] == "0280"]
-    return {"version": 1, "cpu": cpu(s), "speicher": speicher(s), "system": system(s),
-            "pci": p, "usb": usb(s), "datentraeger": datentraeger(s), "netzwerk": net,
-            "wlan": {"geraete": [x for x in net if x["art"] == "WLAN"], "pci": wlan_pci},
-            "grafik": grafik(s, p), "audio": audio(s, p), "ohne_treiber": ohne}
+    h = {"version": 1, "cpu": cpu(s), "speicher": speicher(s), "system": system(s),
+         "pci": p, "usb": usb(s), "datentraeger": datentraeger(s), "netzwerk": net,
+         "wlan": {"geraete": [x for x in net if x["art"] == "WLAN"], "pci": wlan_pci},
+         "grafik": grafik(s, p), "audio": audio(s, p), "ohne_treiber": ohne}
+    h["hinweise"] = hinweise(s, h)
+    return h
 
 
 def text(h):
@@ -273,6 +290,10 @@ def text(h):
             z.append(f"  {p['adresse']:<14} [{p['id']}] {p['hersteller']}: {p['art']}")
     else:
         z.append("Alle Geraete haben einen Treiber.")
+    if h["hinweise"]:
+        z.append("")
+        z.append("Hinweise:")
+        z.extend(f"  {x}" for x in h["hinweise"])
     return "\n".join(z)
 
 
