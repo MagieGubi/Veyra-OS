@@ -17,7 +17,7 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | Kernel 6.18.56-veyra2 | ✅ | zwei unabhängige Builds bit-identisch (Job „Kernel reproduzierbar?“) |
 | Basissystem (68 Pakete, glibc bis systemd 257.8) | ✅ | CI Stufe 4b; reproduzierbar ungeprüft |
 | VPKG 0.5 (Installieren, Entfernen, Abhängigkeiten mit Versionsbedingungen, Konflikte, Transaktionen, Signaturen, signierter Index, `pre_remove`, gescheiterte Install-Skripte sichtbar, Netzquellen nur über https) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590), alle Jobs grün; 31 Tests als root, 32 ohne root |
-| VPKG 0.6: Quellen mit Spiegeln, Paket-Cache, Gruppen und Metapakete, update/search/clean/repo list | 🔧 | 38 VPKG-Tests lokal (zwei Spiegel mit kaputtem und veraltetem, abgebrochener Download, kaputter Cache); CI ausstehend |
+| VPKG 0.6: Quellen mit Spiegeln, Paket-Cache, Gruppen und Metapakete, update/search/clean/repo list | ✅ | 38 VPKG-Tests (zwei Spiegel mit kaputtem und veraltetem, abgebrochener Download, kaputter Cache); Selbsttest „Paketgruppen: ok“ im Lauf [44281705958](https://github.com/MagieGubi/Veyra-OS/actions/runs/44281705958); noch kein öffentliches Repository |
 | Wurzelzertifikate (veyra-zertifikate, Mozilla-Bündel aus certifi) | ✅ | Selbsttest „TLS“ im Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): github.com per TLS 1.3 geprüft |
 | Paket-Repository | 🔧 | wird pro Lauf als CI-Artefakt gebaut und signiert (7 Tage); kein dauerhaftes Online-Repository |
 | Boot (UEFI, Kernel direkt als `BOOTX64.EFI`) | ✅ | Login nach etwa 7 s in QEMU |
