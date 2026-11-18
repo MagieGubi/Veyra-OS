@@ -53,6 +53,10 @@ def ok(text):
 
 class VM:
     def __init__(self, platte, log, tmp, cdrom=None):
+        # Jede VM bekommt ein eigenes, frisches Verzeichnis: eine abgebrochene VM hinterlaesst
+        # ihre Sockets, und QEMU soll nie auf alte Dateien treffen.
+        os.makedirs(tmp, exist_ok=True)
+        tmp = tempfile.mkdtemp(prefix="vm.", dir=tmp)
         self.ser = os.path.join(tmp, "seriell")
         self.mon = os.path.join(tmp, "monitor")
         vars_ = os.path.join(tmp, "vars.fd")
