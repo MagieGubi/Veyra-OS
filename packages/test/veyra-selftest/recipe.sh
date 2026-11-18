@@ -6,12 +6,12 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.7
+pkgver=0.8
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate)
+depends=(vpkg systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -141,6 +141,28 @@ if [ -e /etc/veyra/einrichtung-noetig ]; then
   else
     log "Ersteinrichtung: FEHLER (Dienst laeuft nicht: $(systemctl is-active veyra-einrichtung.service))"; fail=1
   fi
+fi
+# Kernel-Haertung (veyra-sicherheit, Kernel-Fragmente veyra-50/60): jeder sysctl-Wert aus der
+# Paketdatei muss im laufenden System gelten, Yama muss aktiv sein, nftables im Kernel.
+if [ -f /usr/lib/sysctl.d/50-veyra-sicherheit.conf ]; then
+  falsch=""; n=0
+  while IFS='=' read -r k v; do
+    k=$(echo "$k" | tr -d ' '); v=$(echo "$v" | tr -d ' ')
+    case $k in ''|'#'*) continue ;; esac
+    n=$((n + 1))
+    ist=$(sysctl -n "$k" 2>/dev/null || echo fehlt)
+    [ "$ist" = "$v" ] || falsch="$falsch $k=$ist(soll $v)"
+  done < /usr/lib/sysctl.d/50-veyra-sicherheit.conf
+  lsm=$(cat /sys/kernel/security/lsm 2>/dev/null || echo "")
+  case ",$lsm," in *,yama,*) ;; *) falsch="$falsch LSM-ohne-yama($lsm)" ;; esac
+  zgrep -qx 'CONFIG_NF_TABLES=y' /proc/config.gz 2>/dev/null || falsch="$falsch CONFIG_NF_TABLES-fehlt"
+  if [ -z "$falsch" ]; then
+    log "Kernel-Haertung: ok ($n sysctl-Werte, LSM $lsm, nftables im Kernel)"
+  else
+    log "Kernel-Haertung: FEHLER:$falsch"; fail=1
+  fi
+else
+  log "Kernel-Haertung: FEHLER (veyra-sicherheit nicht installiert)"; fail=1
 fi
 # Kein Dienst darf beim Start fehlgeschlagen sein.
 kaputt=$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}')
