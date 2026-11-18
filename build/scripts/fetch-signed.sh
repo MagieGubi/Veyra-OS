@@ -5,6 +5,7 @@
 # Aufruf: fetch-signed.sh SOURCES.LIST SOURCES.LOCK ZIEL
 #
 # Zeilen der Liste: URL  SIGNATUR-URL  SCHLUESSEL-URL  (oder widerruf:URL, siehe pruefe_widerrufen;
+#                   SIGNATUR-URL auf .tar.sign: Signatur des entpackten Archivs, wie bei kernel.org;
 #                   oder URL - -: ohne Signatur, nur mit festgeschriebenem SHA-256)
 # - Steht die Datei schon in SOURCES.LOCK, zaehlt nur der festgeschriebene SHA-256.
 # - Sonst: Schluessel von SCHLUESSEL-URL (Seite des Projekts, https) laden; denselben
@@ -24,6 +25,19 @@ dl() { curl -fsSL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 9
 # Fingerabdruecke aller Primaer- und Unterschluessel einer Schluesseldatei
 fprs() { gpg --with-colons --import-options show-only --import "$1" 2>/dev/null | awk -F: '$1 == "fpr" {print $10}' | sort -u; }
 
+# gpg --verify fuer $file mit $work/$file.sig (Status auf stdout). kernel.org signiert das
+# unkomprimierte Archiv (NAME.tar.sign neben NAME.tar.xz): dann zaehlt der entpackte Inhalt.
+verifiziere() {
+  case "$sig" in
+    *.tar.sign) case "$file" in
+                  *.tar.xz) xz -dc "$dest/$file" | gpg --status-fd 1 --verify "$work/$file.sig" - ;;
+                  *.tar.gz) gzip -dc "$dest/$file" | gpg --status-fd 1 --verify "$work/$file.sig" - ;;
+                  *) echo "fetch-signed: .tar.sign passt nicht zu $file" >&2; return 1 ;;
+                esac ;;
+    *) gpg --status-fd 1 --verify "$work/$file.sig" "$dest/$file" ;;
+  esac
+}
+
 zeige() { printf '%s\n' "$1" | while IFS= read -r l; do echo "     $l"; done >&2; }
 
 # Zweite Quelle keyserver.ubuntu.com: Schluessel mit Fingerabdruck $1 nach $work/keyserver.key
@@ -39,7 +53,7 @@ pruefe_aktuell() {
   dl "$keyurl" "$work/projekt.key" || die "Schluessel nicht ladbar: $keyurl"
   gpg -q --import "$work/projekt.key" 2>/dev/null || die "Schluessel von $keyurl nicht lesbar"
   # Welcher Schluessel hat signiert? (VALIDSIG nennt Unterschluessel und Primaerschluessel)
-  st=$(gpg --status-fd 1 --verify "$work/$file.sig" "$dest/$file" 2>/dev/null || true)
+  st=$(verifiziere 2>/dev/null || true)
   primary=$(echo "$st" | awk '$2 == "VALIDSIG" {print $NF}')
   if [ -z "$primary" ]; then
     echo "   Schluessel aus $keyurl:" >&2; zeige "$(fprs "$work/projekt.key")"
@@ -50,7 +64,7 @@ pruefe_aktuell() {
   # Signatur auch nur mit dem Schluessel vom Schluesselserver pruefen
   rm -rf "$GNUPGHOME"; mkdir -m 700 "$GNUPGHOME"
   gpg -q --import "$work/keyserver.key" 2>/dev/null
-  gpg --status-fd 1 --verify "$work/$file.sig" "$dest/$file" 2>/dev/null | grep -q " VALIDSIG .* $primary\$" \
+  verifiziere 2>/dev/null | grep -q " VALIDSIG .* $primary\$" \
     || die "Signatur mit dem Schluessel von keyserver.ubuntu.com nicht gueltig: $file"
 }
 
@@ -61,7 +75,7 @@ pruefe_aktuell() {
 # lautet und nach der Signatur des Archivs ausgestellt wurde.
 pruefe_widerrufen() {
   local revurl=$1 st sigzeit revzeit grund pakete
-  st=$(gpg --status-fd 1 --verify "$work/$file.sig" "$dest/$file" 2>/dev/null || true)
+  st=$(verifiziere 2>/dev/null || true)
   primary=$(echo "$st" | awk '$2 == "ERRSIG" {print $NF}')
   sigzeit=$(echo "$st" | awk '$2 == "ERRSIG" {print $7}')
   [[ $primary =~ ^[0-9A-F]{40}$ ]] || { zeige "$st"; die "Signaturschluessel von $file nicht bestimmbar"; }
@@ -77,7 +91,7 @@ pruefe_widerrufen() {
   case $grund in 01|03) ;; *) die "Schluessel $primary widerrufen mit Grund 0x$grund (nur 01/03 erlaubt)";; esac
   [ -n "$revzeit" ] && [ -n "$sigzeit" ] && [ "$sigzeit" -lt "$revzeit" ] \
     || die "Signatur von $file ($sigzeit) nicht vor dem Widerruf ($revzeit)"
-  gpg --status-fd 1 --verify "$work/$file.sig" "$dest/$file" 2>/dev/null | grep -q " VALIDSIG .* $primary\$" \
+  verifiziere 2>/dev/null | grep -q " VALIDSIG .* $primary\$" \
     || die "Signatur mit dem widerrufenen Schluessel $primary nicht gueltig: $file"
   echo "   Schluessel $primary laut $revurl ersetzt (Grund 0x$grund), Signatur liegt davor"
 }

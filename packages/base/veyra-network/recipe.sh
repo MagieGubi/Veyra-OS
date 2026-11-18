@@ -11,7 +11,7 @@ url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-network)
 sources=(veyra-network)
 sha256sums=(7970f56e9fb303de49f2d3a28c54ea1d635c38c1b1d5ed5d7a8ae90678d859e5)
-depends=(python systemd iproute2 veyra-netzwerk veyra-zertifikate)
+depends=(python systemd iproute2 iwd wireless-regdb veyra-netzwerk veyra-zertifikate)
 
 package() {
   install -Dm755 "$srcdir/veyra-network" "$pkgdir/usr/bin/veyra-network"

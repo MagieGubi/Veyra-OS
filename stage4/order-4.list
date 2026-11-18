@@ -5,3 +5,7 @@ libmnl
 libnftnl
 nftables
 systemd-boot
+# WLAN (Veyra 0.6, Phase 5): ell und iwd, Frequenztabelle wireless-regdb
+ell
+iwd
+wireless-regdb

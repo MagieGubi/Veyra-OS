@@ -6,12 +6,12 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.11
+pkgver=0.12
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg veyra-base veyra-network veyra-security veyra-recovery systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit veyra-firewall nftables veyra-hwinfo)
+depends=(vpkg veyra-base veyra-network veyra-security veyra-recovery systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit veyra-firewall nftables veyra-hwinfo iwd wireless-regdb kmod)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -184,6 +184,28 @@ elif veyra-network diagnose > /run/veyra-network-diagnose.txt 2>&1 \
   log "veyra-network: ok ($(veyra-network geraete | head -n 1 | tr -s ' '), Diagnose ohne MAC-Adressen)"
 else
   log "veyra-network: FEHLER (Diagnose gescheitert oder mit MAC-Adresse)"; fail=1
+fi
+# WLAN (iwd, Phase 5): iwd laeuft auch ohne WLAN-Geraet. In einer VM zusaetzlich mit einem
+# virtuellen Funkgeraet (mac80211_hwsim): iwd erkennt es, regulatory.db ist ladbar.
+if ! systemctl is-active -q iwd.service; then
+  log "WLAN: FEHLER (iwd.service: $(systemctl is-active iwd.service))"; fail=1
+elif systemd-detect-virt -q && modprobe mac80211_hwsim radios=1 2>/dev/null; then
+  gesehen=""
+  for _ in $(seq 20); do
+    gesehen=$(iwctl device list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -o 'wlan[0-9]*' | head -n 1)
+    [ -n "$gesehen" ] && break
+    sleep 0.5
+  done
+  if [ -z "$gesehen" ]; then
+    log "WLAN: FEHLER (iwd erkennt das virtuelle Funkgeraet nicht)"; fail=1
+  elif journalctl -k -b --no-pager | grep -q 'failed to load regulatory.db'; then
+    log "WLAN: FEHLER (regulatory.db nicht ladbar)"; fail=1
+  else
+    log "WLAN: ok (iwd $(iwd --version 2>/dev/null || /usr/lib/iwd/iwd --version), virtuelles Geraet $gesehen erkannt, regulatory.db ok)"
+  fi
+  modprobe -r mac80211_hwsim 2>/dev/null || true
+else
+  log "WLAN: ok (iwd laeuft, kein Test mit virtuellem Funkgeraet)"
 fi
 # Kernel-Haertung (veyra-sicherheit, Kernel-Fragmente veyra-50/60): jeder sysctl-Wert aus der
 # Paketdatei muss im laufenden System gelten, Yama muss aktiv sein, nftables im Kernel.
