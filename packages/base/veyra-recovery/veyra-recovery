@@ -142,7 +142,8 @@ def _hole_datei(quelle_pfad, ziel_pfad, modus):
         if os.path.lexists(neu):
             os.unlink(neu)
         shutil.copyfile(quelle_pfad, neu, follow_symlinks=False)
-        os.chown(neu, 0, 0)
+        if os.geteuid() == 0:     # Paketdateien gehoeren root (Tests laufen ohne root)
+            os.chown(neu, 0, 0)
         os.chmod(neu, modus)
         if os.path.isdir(ziel_pfad) and not os.path.islink(ziel_pfad):
             raise Fehler(f"{ziel_pfad} ist ein Verzeichnis, nicht ersetzt")

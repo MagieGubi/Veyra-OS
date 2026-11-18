@@ -10,7 +10,7 @@ license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-recovery)
 sources=(veyra-recovery)
-sha256sums=(9b79fa94c5dd0b37e2223a4fbcc809929cfa3ec21714d1b1a8153eed8d048b11)
+sha256sums=(968dc707ce967c5dec8bdc91fbf6539d5e8359782aabefd6aea6ff225d9b82e5)
 depends=(python systemd e2fsprogs util-linux coreutils kbd less vpkg veyra-installer veyra-konten veyra-boot)
 
 package() {

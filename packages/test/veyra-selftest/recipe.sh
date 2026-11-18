@@ -6,12 +6,12 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.10
+pkgver=0.11
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg veyra-base veyra-network veyra-security veyra-recovery systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit veyra-firewall nftables)
+depends=(vpkg veyra-base veyra-network veyra-security veyra-recovery systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit veyra-firewall nftables veyra-hwinfo)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -160,6 +160,20 @@ if [ -n "$gr" ]; then
   log "Paketgruppen: FEHLER (Metapaket fehlt oder ohne Gruppe:$gr)"; fail=1
 else
   log "Paketgruppen: ok ($(vpkg --version), Metapakete veyra-base, -network, -security, -recovery)"
+fi
+# Hardware-Erkennung (veyra-hwinfo): JSON gueltig, Threads wie nproc, Speicher und ein
+# Netzwerkadapter mit Treiber erkannt (die VM hat immer einen).
+if hw=$(veyra-hwinfo --json 2>&1) && echo "$hw" | python3 -c '
+import json, os, sys
+h = json.load(sys.stdin)
+assert h["cpu"]["threads"] == os.cpu_count(), "Threads"
+assert h["speicher"]["gesamt_mib"] > 0, "Speicher"
+assert any(n["treiber"] for n in h["netzwerk"]), "Netzwerkadapter"
+c, m, p, o = h["cpu"]["threads"], h["speicher"]["gesamt_mib"], len(h["pci"]), len(h["ohne_treiber"])
+print(f"{c} Threads, {m} MiB, {p} PCI-Geraete, {o} ohne Treiber")' > /run/veyra-hwinfo.txt 2>&1; then
+  log "Hardware: ok ($(cat /run/veyra-hwinfo.txt))"
+else
+  log "Hardware: FEHLER ($(tail -n 1 /run/veyra-hwinfo.txt 2>/dev/null))"; fail=1
 fi
 # Kernel-Haertung (veyra-sicherheit, Kernel-Fragmente veyra-50/60): jeder sysctl-Wert aus der
 # Paketdatei muss im laufenden System gelten, Yama muss aktiv sein, nftables im Kernel.

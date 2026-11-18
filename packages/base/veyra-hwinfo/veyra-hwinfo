@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""veyra-hwinfo: Hardware erkennen und beschreiben (Veyra 0.6). Liest nur, aktiviert nichts.
+
+  veyra-hwinfo            Text
+  veyra-hwinfo --json     dasselbe als JSON (z. B. fuer Fehlerberichte)
+
+Quellen sind ausschliesslich /proc und /sys: CPU, Arbeitsspeicher, Mainboard und Firmware,
+PCI- und USB-Geraete, NVMe- und SATA-Datentraeger, Grafik, Netzwerk (Ethernet und WLAN) und
+Audio. Zu jedem PCI-Geraet steht der geladene Treiber; Geraete ohne Treiber werden am Ende
+aufgefuehrt, damit der Kernel anhand echter Hardware erweitert werden kann. Seriennummern
+und MAC-Adressen gibt veyra-hwinfo nicht aus.
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import sys
+
+# Hersteller-IDs (PCI und USB teilen sich viele davon); Veyra hat keine pci.ids-Datenbank.
+HERSTELLER = {
+    "8086": "Intel", "10de": "NVIDIA", "1002": "AMD", "1022": "AMD", "10ec": "Realtek",
+    "14c3": "MediaTek", "168c": "Qualcomm Atheros", "17cb": "Qualcomm", "14e4": "Broadcom",
+    "1344": "Micron", "144d": "Samsung", "15b7": "Sandisk/WD", "1c5c": "SK hynix",
+    "1987": "Phison", "126f": "Silicon Motion", "1b4b": "Marvell", "1af4": "virtio (Red Hat)",
+    "1b36": "QEMU (Red Hat)", "1234": "QEMU", "15ad": "VMware", "80ee": "VirtualBox",
+    "1d6b": "Linux Foundation", "046d": "Logitech", "0bda": "Realtek", "1058": "Western Digital",
+    "0781": "SanDisk", "13d3": "IMC Networks", "8087": "Intel", "0cf3": "Qualcomm Atheros",
+    "1462": "MSI", "1043": "ASUS", "17aa": "Lenovo", "103c": "HP", "1028": "Dell",
+}
+# PCI-Klassen (Klasse+Unterklasse), soweit fuer die Einordnung noetig
+KLASSEN = {
+    "0100": "SCSI-Controller", "0101": "IDE-Controller", "0104": "RAID-Controller",
+    "0106": "SATA-Controller", "0107": "SAS-Controller", "0108": "NVMe-Controller",
+    "0180": "Massenspeicher",
+    "0200": "Ethernet", "0280": "Netzwerk (meist WLAN)", "0300": "Grafik (VGA)",
+    "0302": "Grafik (3D)", "0380": "Grafik", "0401": "Audio", "0403": "Audio (HD Audio)",
+    "0480": "Multimedia", "0600": "Host-Bridge", "0601": "ISA-Bridge", "0604": "PCI-Bridge",
+    "0780": "Kommunikation", "0880": "Systemgeraet", "0c03": "USB-Controller",
+    "0c05": "SMBus", "0c80": "Seriell", "0d11": "Bluetooth", "1180": "Signalverarbeitung",
+}
+
+
+class Sys:
+    """Zugriff auf /sys und /proc unter ROOT (Tests: ein nachgebauter Baum)."""
+
+    def __init__(self, root="/"):
+        self.root = root
+
+    def p(self, pfad):
+        """Pfad unter ROOT; Pfade aus liste() tragen ROOT schon."""
+        if self.root != "/" and pfad.startswith(self.root.rstrip("/") + "/"):
+            return pfad
+        return os.path.join(self.root, pfad.lstrip("/"))
+
+    def lies(self, pfad, standard=""):
+        try:
+            with open(self.p(pfad), errors="replace") as f:
+                return f.read().strip()
+        except OSError:
+            return standard
+
+    def liste(self, muster):
+        return sorted(glob.glob(self.p(muster)))
+
+    def treiber(self, geraet_pfad):
+        d = os.path.join(geraet_pfad, "driver")
+        return os.path.basename(os.readlink(d)) if os.path.islink(d) else None
+
+
+def hersteller(vid):
+    vid = vid.lower().removeprefix("0x")
+    return HERSTELLER.get(vid, f"Hersteller {vid}")
+
+
+def cpu(s):
+    info = s.lies("/proc/cpuinfo")
+    modell, kerne, pakete, flags, threads = "", set(), set(), set(), 0
+    phys = core = None
+    for z in info.splitlines() + [""]:
+        k, _, v = z.partition(":")
+        k, v = k.strip(), v.strip()
+        if k == "processor":
+            threads += 1
+        elif k == "model name" and not modell:
+            modell = v
+        elif k == "physical id":
+            phys = v
+            pakete.add(v)
+        elif k == "core id":
+            core = v
+        elif k == "flags" and not flags:
+            flags = set(v.split())
+        elif not z.strip() and core is not None:
+            kerne.add((phys, core))
+            core = None
+    return {"modell": modell or "unbekannt", "threads": threads, "kerne": len(kerne) or None,
+            "sockel": len(pakete) or None,
+            "virtualisierung": "VT-x" if "vmx" in flags else ("AMD-V" if "svm" in flags else None),
+            "hypervisor": "hypervisor" in flags}
+
+
+def speicher(s):
+    for z in s.lies("/proc/meminfo").splitlines():
+        if z.startswith("MemTotal:"):
+            return {"gesamt_mib": int(z.split()[1]) // 1024}
+    return {"gesamt_mib": None}
+
+
+def system(s):
+    d = "/sys/class/dmi/id/"
+    efi = os.path.isdir(s.p("/sys/firmware/efi"))
+    sb = None
+    for f in s.liste("/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"):
+        try:
+            with open(f, "rb") as h:
+                b = h.read()
+            sb = len(b) >= 5 and b[4] == 1
+        except OSError:
+            pass
+    return {"hersteller": s.lies(d + "sys_vendor") or None, "produkt": s.lies(d + "product_name") or None,
+            "mainboard": " ".join(x for x in (s.lies(d + "board_vendor"), s.lies(d + "board_name")) if x) or None,
+            "bios": " ".join(x for x in (s.lies(d + "bios_version"), s.lies(d + "bios_date")) if x) or None,
+            "firmware": "UEFI" if efi else "BIOS (Legacy)", "secure_boot": sb}
+
+
+def pci(s):
+    out = []
+    for d in s.liste("/sys/bus/pci/devices/*"):
+        klasse = s.lies(os.path.join(d, "class")).removeprefix("0x")
+        vid = s.lies(os.path.join(d, "vendor")).removeprefix("0x")
+        did = s.lies(os.path.join(d, "device")).removeprefix("0x")
+        k4 = klasse[:4]
+        out.append({"adresse": os.path.basename(d), "id": f"{vid}:{did}", "hersteller": hersteller(vid),
+                    "klasse": k4, "art": KLASSEN.get(k4, f"Klasse {k4}"), "treiber": s.treiber(d)})
+    return out
+
+
+def usb(s):
+    out = []
+    for d in s.liste("/sys/bus/usb/devices/*"):
+        if ":" in os.path.basename(d) or not os.path.exists(os.path.join(d, "idVendor")):
+            continue
+        vid = s.lies(os.path.join(d, "idVendor"))
+        treiber = sorted({t for i in glob.glob(os.path.join(d, os.path.basename(d) + ":*"))
+                          if (t := s.treiber(i))})
+        out.append({"bus": os.path.basename(d), "id": f"{vid}:{s.lies(os.path.join(d, 'idProduct'))}",
+                    "hersteller": s.lies(os.path.join(d, "manufacturer")) or hersteller(vid),
+                    "produkt": s.lies(os.path.join(d, "product")) or None, "treiber": treiber})
+    return out
+
+
+def groesse_gib(s, block):
+    sek = s.lies(f"/sys/block/{block}/size")
+    return round(int(sek) * 512 / 2**30, 1) if sek.isdigit() else None
+
+
+def datentraeger(s):
+    out = []
+    for d in s.liste("/sys/block/*"):
+        n = os.path.basename(d)
+        if n.startswith(("loop", "ram", "zram", "dm-", "sr")):
+            continue
+        echt = os.path.realpath(d)
+        if not groesse_gib(s, n):
+            continue          # leere Laufwerke (z. B. Kartenleser ohne Karte)
+        if n.startswith("nvme"):
+            art = "NVMe"
+            m = re.match(r"(nvme\d+)n\d+$", n)
+            modell = s.lies(f"/sys/class/nvme/{m.group(1)}/model") if m else ""
+        else:
+            art = ("USB" if "/usb" in echt else "SATA" if "/ata" in echt else
+                   "virtio" if n.startswith("vd") else "MMC" if n.startswith("mmcblk") else "sonstig")
+            modell = s.lies(os.path.join(d, "device/model"))
+        out.append({"name": n, "art": art, "modell": modell or None, "groesse_gib": groesse_gib(s, n),
+                    "wechselbar": s.lies(os.path.join(d, "removable")) == "1",
+                    "ssd": s.lies(os.path.join(d, "queue/rotational")) == "0"})
+    return out
+
+
+def netzwerk(s):
+    out = []
+    for d in s.liste("/sys/class/net/*"):
+        n = os.path.basename(d)
+        if n == "lo" or not os.path.exists(os.path.join(d, "device")):
+            continue          # nur echte Geraete, keine Bruecken oder Tunnel
+        wlan = os.path.isdir(os.path.join(d, "wireless")) or os.path.exists(os.path.join(d, "phy80211"))
+        geschw = s.lies(os.path.join(d, "speed"))
+        out.append({"name": n, "art": "WLAN" if wlan else "Ethernet",
+                    "treiber": s.treiber(os.path.join(d, "device")),
+                    "zustand": s.lies(os.path.join(d, "operstate")) or None,
+                    "mbit": int(geschw) if geschw.lstrip("-").isdigit() and int(geschw) > 0 else None})
+    return out
+
+
+def grafik(s, pci_liste):
+    karten = []
+    for d in s.liste("/sys/class/drm/card[0-9]*"):
+        if "-" in os.path.basename(d):
+            continue
+        karten.append({"name": os.path.basename(d), "treiber": s.treiber(os.path.join(d, "device"))})
+    return {"pci": [p for p in pci_liste if p["klasse"].startswith("03")], "drm": karten}
+
+
+def audio(s, pci_liste):
+    karten = [{"name": os.path.basename(d), "id": s.lies(os.path.join(d, "id"))}
+              for d in s.liste("/sys/class/sound/card[0-9]*")]
+    return {"pci": [p for p in pci_liste if p["klasse"].startswith("04")], "karten": karten}
+
+
+def erfasse(root="/"):
+    s = Sys(root)
+    p = pci(s)
+    net = netzwerk(s)
+    ohne = [x for x in p if not x["treiber"] and not x["klasse"].startswith("06")]
+    wlan_pci = [x for x in p if x["klasse"] == "0280"]
+    return {"version": 1, "cpu": cpu(s), "speicher": speicher(s), "system": system(s),
+            "pci": p, "usb": usb(s), "datentraeger": datentraeger(s), "netzwerk": net,
+            "wlan": {"geraete": [x for x in net if x["art"] == "WLAN"], "pci": wlan_pci},
+            "grafik": grafik(s, p), "audio": audio(s, p), "ohne_treiber": ohne}
+
+
+def text(h):
+    z = []
+    c = h["cpu"]
+    z.append(f"CPU:          {c['modell']} ({c['kerne'] or '?'} Kerne, {c['threads']} Threads"
+             + (f", {c['virtualisierung']}" if c["virtualisierung"] else "")
+             + (", in einer VM" if c["hypervisor"] else "") + ")")
+    z.append(f"Speicher:     {h['speicher']['gesamt_mib']} MiB")
+    sy = h["system"]
+    z.append(f"System:       {sy['hersteller'] or '?'} {sy['produkt'] or ''}".rstrip())
+    z.append(f"Mainboard:    {sy['mainboard'] or '?'}, BIOS {sy['bios'] or '?'}")
+    sb = {True: "an", False: "aus", None: "unbekannt"}[sy["secure_boot"]]
+    z.append(f"Firmware:     {sy['firmware']}, Secure Boot {sb}")
+    z.append("")
+    z.append("Datentraeger:")
+    if not h["datentraeger"]:
+        z.append("  (keine)")
+    for d in h["datentraeger"]:
+        z.append(f"  {d['name']:<10} {d['art']:<7} {d['modell'] or '':<28} "
+                 f"{'' if d['groesse_gib'] is None else str(d['groesse_gib']) + ' GiB'}"
+                 + (" wechselbar" if d["wechselbar"] else ""))
+    z.append("Netzwerk:")
+    if not h["netzwerk"]:
+        z.append("  (keine)")
+    for n in h["netzwerk"]:
+        z.append(f"  {n['name']:<10} {n['art']:<9} Treiber {n['treiber'] or '-':<12} {n['zustand'] or ''}"
+                 + (f" {n['mbit']} Mbit/s" if n["mbit"] else ""))
+    if h["wlan"]["pci"] and not h["wlan"]["geraete"]:
+        z.append("  WLAN-Chip vorhanden, aber kein WLAN-Geraet: Treiber oder Firmware fehlt")
+    z.append("Grafik:")
+    if not h["grafik"]["pci"]:
+        z.append("  (keine)")
+    for g in h["grafik"]["pci"]:
+        z.append(f"  {g['adresse']:<14} {g['hersteller']} {g['art']} [{g['id']}] Treiber {g['treiber'] or '-'}")
+    z.append("Audio:")
+    if not h["audio"]["pci"]:
+        z.append("  (keine)")
+    for a in h["audio"]["pci"]:
+        z.append(f"  {a['adresse']:<14} {a['hersteller']} {a['art']} [{a['id']}] Treiber {a['treiber'] or '-'}")
+    z.append("")
+    z.append(f"PCI-Geraete ({len(h['pci'])}):")
+    for p in h["pci"]:
+        z.append(f"  {p['adresse']:<14} [{p['id']}] {p['hersteller']}: {p['art']}, Treiber {p['treiber'] or '-'}")
+    z.append(f"USB-Geraete ({len(h['usb'])}):")
+    for u in h["usb"]:
+        z.append(f"  {u['bus']:<8} [{u['id']}] {u['hersteller']} {u['produkt'] or ''}".rstrip()
+                 + (f", Treiber {', '.join(u['treiber'])}" if u["treiber"] else ""))
+    z.append("")
+    if h["ohne_treiber"]:
+        z.append("Ohne Treiber (Kernel-Erweiterung pruefen, nichts wurde aktiviert):")
+        for p in h["ohne_treiber"]:
+            z.append(f"  {p['adresse']:<14} [{p['id']}] {p['hersteller']}: {p['art']}")
+    else:
+        z.append("Alle Geraete haben einen Treiber.")
+    return "\n".join(z)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="veyra-hwinfo", description=__doc__.split("\n")[0])
+    ap.add_argument("--json", action="store_true", help="Ausgabe als JSON")
+    ap.add_argument("--root", default="/", help=argparse.SUPPRESS)   # fuer Tests
+    a = ap.parse_args(argv)
+    h = erfasse(a.root)
+    print(json.dumps(h, ensure_ascii=False, indent=2) if a.json else text(h))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
