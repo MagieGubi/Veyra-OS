@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""veyra-kernel-update: neuen Kernel neben den alten legen, mit Rueckfall (Veyra 0.6).
+
+  veyra-kernel-update [--esp DIR] installiere KERNEL VERSION
+  veyra-kernel-update [--esp DIR] liste
+  veyra-kernel-update [--esp DIR] entferne VERSION
+
+installiere prueft die Kerneldatei (EFI-Programm mit Linux-Boot-Header), legt sie unter
+ESP/veyra/VERSION/linux ab und schreibt den Eintrag loader/entries/veyra-VERSION+3.conf
+mit denselben Optionen wie der zuletzt gute Eintrag. systemd-boot startet den neuen Kernel
+zuerst (hoechste Version). Gelingt ein Start vollstaendig, benennt systemd-bless-boot den
+Eintrag in veyra-VERSION.conf um, und er bleibt Standard. Scheitert er dreimal, gilt er als
+schlecht und systemd-boot startet wieder den letzten guten Kernel.
+
+Aufgeraeumt wird nur, was sicher nicht mehr gebraucht wird: von den guten Eintraegen
+bleiben die zwei neuesten (und immer der gerade laufende), dazu alle noch ungeprueften.
+Jede Datei wird erst unter einem anderen Namen fertig geschrieben und dann umbenannt.
+"""
+import argparse
+import os
+import re
+import struct
+import sys
+
+ESP = "/efi"
+VERSUCHE = 3
+BEHALTE_GUTE = 2
+MAX_KERNEL = 256 << 20
+VERSION_RE = re.compile(r"^[0-9][0-9A-Za-z._+~-]{0,63}$")
+# veyra-VERSION.conf, veyra-VERSION+LINKS.conf, veyra-VERSION+LINKS-VERSUCHT.conf
+EINTRAG_RE = re.compile(r"^veyra-(?P<v>[0-9][0-9A-Za-z._~-]*?)(?:\+(?P<links>\d+)(?:-(?P<versucht>\d+))?)?\.conf$")
+LOADER_GUID = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+
+
+class Fehler(Exception):
+    pass
+
+
+def pruefe_kernel(pfad):
+    """Ein Linux-Kernel mit EFI-Stub: MZ-Kopf, PE-Signatur, Linux-Boot-Header 'HdrS'."""
+    groesse = os.path.getsize(pfad)
+    if not 1 << 20 <= groesse <= MAX_KERNEL:
+        raise Fehler(f"{pfad}: unplausible Groesse fuer einen Kernel ({groesse} Bytes)")
+    with open(pfad, "rb") as f:
+        kopf = f.read(4096)
+    if kopf[:2] != b"MZ":
+        raise Fehler(f"{pfad}: kein EFI-Programm (MZ-Kopf fehlt)")
+    pe = struct.unpack_from("<I", kopf, 0x3C)[0]
+    if pe + 4 > len(kopf) or kopf[pe:pe + 4] != b"PE\0\0":
+        raise Fehler(f"{pfad}: kein EFI-Programm (PE-Signatur fehlt)")
+    if kopf[0x202:0x206] != b"HdrS":
+        raise Fehler(f"{pfad}: kein Linux-Kernel (Boot-Header HdrS fehlt)")
+
+
+def vercmp_schluessel(v):
+    """Sortierschluessel wie systemd-boot ungefaehr: Zahlen numerisch, sonst Text."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t) for t in re.findall(r"\d+|[A-Za-z]+", v)]
+
+
+def eintraege(esp):
+    d = os.path.join(esp, "loader/entries")
+    if not os.path.isdir(d):
+        raise Fehler(f"{d} fehlt: ist {esp} die EFI-Systempartition mit systemd-boot?")
+    out = []
+    for n in os.listdir(d):
+        m = EINTRAG_RE.match(n)
+        if not m:
+            continue
+        links = m.group("links")
+        zustand = "gut" if links is None else ("schlecht" if int(links) == 0 else "ungeprueft")
+        out.append({"datei": n, "version": m.group("v"), "zustand": zustand,
+                    "links": None if links is None else int(links)})
+    out.sort(key=lambda e: vercmp_schluessel(e["version"]), reverse=True)
+    return out
+
+
+def lies_eintrag(esp, datei):
+    werte = {}
+    with open(os.path.join(esp, "loader/entries", datei), encoding="utf-8") as f:
+        for z in f:
+            z = z.strip()
+            if z and not z.startswith("#"):
+                k, _, v = z.partition(" ")
+                werte[k] = v.strip()
+    return werte
+
+
+def gebootete_version():
+    """Version des Eintrags, den systemd-boot gestartet hat (EFI-Variable), sonst uname."""
+    p = f"/sys/firmware/efi/efivars/LoaderEntrySelected-{LOADER_GUID}"
+    try:
+        with open(p, "rb") as f:
+            name = f.read()[4:].decode("utf-16-le").rstrip("\0")
+        m = EINTRAG_RE.match(name if name.endswith(".conf") else name + ".conf")
+        if m:
+            return m.group("v")
+    except OSError:
+        pass
+    return os.uname().release
+
+
+def schreibe(pfad, daten):
+    os.makedirs(os.path.dirname(pfad), exist_ok=True)
+    neu = pfad + ".neu"
+    with open(neu, "wb") as f:
+        f.write(daten)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(neu, pfad)
+
+
+def installiere(esp, kernel, version, gebootet):
+    if not VERSION_RE.match(version) or "+" in version:
+        raise Fehler(f"ungueltige Version {version!r}")
+    pruefe_kernel(kernel)
+    liste = eintraege(esp)
+    if any(e["version"] == version for e in liste):
+        raise Fehler(f"Kernel {version} ist schon eingetragen (erst: veyra-kernel-update entferne {version})")
+    vorlage = next((e for e in liste if e["version"] == gebootet), None) \
+        or next((e for e in liste if e["zustand"] == "gut"), None)
+    if vorlage is None:
+        raise Fehler("kein guter Eintrag als Vorlage gefunden (laufender oder dauerhaft markierter Kernel)")
+    alt = lies_eintrag(esp, vorlage["datei"])
+    if "options" not in alt or "root=" not in alt["options"]:
+        raise Fehler(f"Eintrag {vorlage['datei']} hat keine Root-Angabe; nichts geaendert")
+    with open(kernel, "rb") as f:
+        daten = f.read()
+    ziel = os.path.join(esp, "veyra", version, "linux")
+    schreibe(ziel, daten)
+    with open(ziel, "rb") as f:
+        if f.read() != daten:
+            raise Fehler(f"{ziel}: Kopie weicht ab")
+    text = (f"title      {alt.get('title', 'Veyra OS')}\n"
+            f"version    {version}\n"
+            f"sort-key   {alt.get('sort-key', 'veyra')}\n"
+            f"linux      /veyra/{version}/linux\n"
+            f"options    {alt['options']}\n")
+    schreibe(os.path.join(esp, "loader/entries", f"veyra-{version}+{VERSUCHE}.conf"), text.encode())
+    print(f"Kernel {version} eingetragen (Vorlage: {vorlage['datei']}).")
+    print(f"Beim naechsten Start versucht systemd-boot zuerst {version}. Gelingt ein Start "
+          f"vollstaendig, bleibt er Standard; scheitert er {VERSUCHE}-mal, startet wieder "
+          f"{vorlage['version']}.")
+    raeume_auf(esp, gebootet)
+
+
+def entferne_version(esp, e):
+    os.unlink(os.path.join(esp, "loader/entries", e["datei"]))
+    d = os.path.join(esp, "veyra", e["version"])
+    if os.path.isdir(d):
+        for n in os.listdir(d):
+            os.unlink(os.path.join(d, n))
+        os.rmdir(d)
+
+
+def raeume_auf(esp, gebootet):
+    gute = [e for e in eintraege(esp) if e["zustand"] == "gut"]
+    for e in gute[BEHALTE_GUTE:]:
+        if e["version"] == gebootet:
+            continue
+        entferne_version(esp, e)
+        print(f"Alten Kernel {e['version']} entfernt (es bleiben die {BEHALTE_GUTE} neuesten guten).")
+
+
+def entferne(esp, version, gebootet):
+    liste = eintraege(esp)
+    e = next((x for x in liste if x["version"] == version), None)
+    if e is None:
+        raise Fehler(f"Kernel {version} ist nicht eingetragen")
+    if version == gebootet:
+        raise Fehler(f"Kernel {version} laeuft gerade und bleibt")
+    if e["zustand"] == "gut" and not any(x["zustand"] == "gut" and x is not e for x in liste):
+        raise Fehler(f"Kernel {version} ist der einzige gute Eintrag und bleibt")
+    entferne_version(esp, e)
+    print(f"Kernel {version} entfernt.")
+
+
+def liste(esp, gebootet):
+    for e in eintraege(esp):
+        z = {"gut": "gut", "schlecht": "schlecht (wird uebersprungen)",
+             "ungeprueft": f"ungeprueft, noch {e['links']} Versuch(e)"}[e["zustand"]]
+        lauf = "  <- laeuft" if e["version"] == gebootet else ""
+        print(f"{e['version']:<24} {z}{lauf}")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="veyra-kernel-update", description=__doc__.split("\n")[0])
+    ap.add_argument("--esp", default=ESP, help="EFI-Systempartition (Standard: /efi)")
+    ap.add_argument("--gebootet", help=argparse.SUPPRESS)  # fuer Tests ohne EFI-Variablen
+    sub = ap.add_subparsers(dest="befehl", required=True)
+    p = sub.add_parser("installiere", help="neuen Kernel eintragen")
+    p.add_argument("kernel")
+    p.add_argument("version")
+    sub.add_parser("liste", help="eingetragene Kernel und ihr Zustand")
+    p = sub.add_parser("entferne", help="einen Kernel austragen")
+    p.add_argument("version")
+    a = ap.parse_args()
+    gebootet = a.gebootet or gebootete_version()
+    try:
+        if a.befehl == "installiere":
+            installiere(a.esp, a.kernel, a.version, gebootet)
+        elif a.befehl == "liste":
+            liste(a.esp, gebootet)
+        else:
+            entferne(a.esp, a.version, gebootet)
+    except (Fehler, OSError) as e:
+        print(f"veyra-kernel-update: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

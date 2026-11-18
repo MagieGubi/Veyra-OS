@@ -12,7 +12,12 @@ Start 1 (Ersteinrichtung):
 Start 2 (Neustart von derselben Platte):
   - Login-Aufforderung und Selbsttest OK, keine Ersteinrichtung mehr
   - Anmeldung als root mit dem neuen Passwort, System laeuft ohne Fehler
+  - Booteintrag von Start 1 als gut markiert (systemd-bless-boot)
+  - veyra-kernel-update traegt einen neuen Kernel ein, der absichtlich nicht startet
+    (Root-Partition gibt es nicht, panic=3)
   - Herunterfahren per poweroff
+Start 3 (Rueckfall): der neue Kernel scheitert dreimal (Boot-Zaehler), danach startet
+  systemd-boot wieder den alten Kernel; veyra-kernel-update meldet den neuen als schlecht.
 
 Die Platte wird beschrieben (kein snapshot): nur eine eigens erstellte virtuelle Platte
 verwenden. Aufruf: image/install-test.py PLATTE.img LOG-VERZ
@@ -260,10 +265,53 @@ def start2(platte, logdir, tmp):
         vm.befehl("systemctl is-active veyra-rootpruefung; test -e /run/issue.d/50-veyra-root.issue "
                   "|| echo KEINE-WARNUNG-$((9+9))", r"active\s*\r?\n[^\n]*KEINE-WARNUNG-18")
         ok("Startpruefung gelaufen, keine Warnung bei einer Veyra-Platte")
+        # Kernel-Update mit einem Kernel, der nicht startet: derselbe Kernel, aber eine
+        # Root-Partition, die es nicht gibt. panic=3 startet neu; QEMU (-no-reboot) endet dann.
+        vm.befehl("veyra-kernel-update installiere /efi/veyra/$(uname -r)/linux 6.18.99-kaputt; "
+                  "echo KU-$?-$((1+1))", r"KU-0-2", 120)
+        vm.befehl("sed -i 's/^options .*/options    root=PARTUUID=00000000-0000-0000-0000-000000000000 "
+                  "rootwait=5 panic=3/' /efi/loader/entries/veyra-6.18.99-kaputt+3.conf && sync; "
+                  "echo SED-$?-$((2+2))", r"SED-0-4")
+        vm.befehl("veyra-kernel-update liste; echo KL-$((3+3))", r"6\.18\.99-kaputt +ungeprueft, noch 3[^\n]*\n[^\n]*gut +<- laeuft[^\n]*\n[^\n]*KL-6")
+        ok("veyra-kernel-update: neuer (kaputter) Kernel neben dem laufenden eingetragen")
         vm.sende("poweroff\r")
         ok(f"sauber heruntergefahren ({vm.ende():.0f}s)")
     finally:
         vm.stopp()
+
+
+def start3(platte, logdir, tmp):
+    schritt("Start 3: neuer Kernel scheitert, Rueckfall ueber den Boot-Zaehler")
+    fehlstarts = 0
+    for versuch in range(1, 6):
+        vm = VM(platte, os.path.join(logdir, f"start3-{versuch}.log"), tmp)
+        try:
+            m = vm.erwarte(r"veyra login:|Kernel panic", 300)
+            if m.group(0) == "Kernel panic":
+                fehlstarts += 1
+                bis = time.time() + 90
+                while vm.p.poll() is None and time.time() < bis:
+                    vm._lies(0.5)
+                if vm.p.poll() is None:
+                    raise Fehler("nach der Kernel panic kein Neustart (panic=3)")
+                ok(f"Versuch {versuch}: neuer Kernel startet nicht (Kernel panic), Neustart")
+                continue
+            if fehlstarts != 3:
+                raise Fehler(f"{fehlstarts} Fehlstarts statt 3 vor dem Rueckfall")
+            ok("nach 3 Fehlstarts startet wieder der alte Kernel bis zur Anmeldung")
+            vm.anmelden("root", ROOT_PW, versuche=3)
+            vm.befehl("uname -r; echo UN-$((4+5))", r"veyra[0-9]+\s*\r?\n[^\n]*UN-9")
+            vm.befehl("veyra-kernel-update liste; echo KL-$((5+5))",
+                      r"6\.18\.99-kaputt +schlecht[^\n]*\n[^\n]*gut +<- laeuft[^\n]*\n[^\n]*KL-10")
+            ok("veyra-kernel-update liste: neuer Kernel schlecht, alter laeuft")
+            vm.befehl("veyra-kernel-update entferne 6.18.99-kaputt; echo KE-$?-$((6+6))", r"KE-0-12")
+            ok("schlechten Kernel entfernt")
+            vm.sende("poweroff\r")
+            ok(f"sauber heruntergefahren ({vm.ende():.0f}s)")
+            return
+        finally:
+            vm.stopp()
+    raise Fehler("auch nach 5 Starts keine Anmeldung: Rueckfall auf den alten Kernel fehlt")
 
 
 def main():
@@ -280,6 +328,7 @@ def main():
     try:
         start1(platte, logdir, tmp)
         start2(platte, logdir, tmp)
+        start3(platte, logdir, tmp)
     except Fehler as e:
         print(f"FEHLER: {e}", file=sys.stderr)
         for f in sorted(os.listdir(logdir)):
@@ -289,7 +338,7 @@ def main():
         return 1
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    print("ERFOLG: Ersteinrichtung, Anmeldung, su und Neustart der installierten Platte")
+    print("ERFOLG: Ersteinrichtung, Anmeldung, su, Neustart und Kernel-Rueckfall der installierten Platte")
     return 0
 
 

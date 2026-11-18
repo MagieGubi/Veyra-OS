@@ -33,7 +33,7 @@ jobs:
       - name: Firewall-Regeln testen
         run: sudo apt-get install -y nftables && sudo bash tests/firewall/firewall-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
-        run: bash tests/boot/diagnose-test.sh
+        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh
       - name: Konten testen (Ersteinrichtung, Kontenpruefung)
         run: sudo bash tests/konten/konten-test.sh
       - name: Abbild-Varianten testen (dev und test, mit Probe-System)
@@ -562,7 +562,7 @@ jobs:
       - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, veyra-zertifikate, veyra-sicherheit, veyra-firewall, Metapakete, vpkg, Selbsttest)
         run: |
           build/scripts/fetch-extra.sh "$RUNNER_TEMP/quellen"
-          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/veyra-zertifikate packages/base/veyra-sicherheit packages/base/veyra-firewall packages/base/veyra-base packages/base/veyra-network packages/base/veyra-security packages/base/veyra-development packages/base/veyra-recovery packages/base/vpkg packages/test/veyra-selftest; do
+          for r in packages/base/veyra-release packages/base/veyra-netzwerk packages/base/veyra-konten packages/base/veyra-installer packages/base/veyra-zertifikate packages/base/veyra-sicherheit packages/base/veyra-firewall packages/base/veyra-base packages/base/veyra-network packages/base/veyra-security packages/base/veyra-development packages/base/veyra-recovery packages/base/veyra-boot packages/base/vpkg packages/test/veyra-selftest; do
             build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir extra "$r"
           done
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo

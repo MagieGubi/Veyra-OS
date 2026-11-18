@@ -7,6 +7,6 @@ pkgdesc="Werkzeuge zur Reparatur (Metapaket)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-recovery)
-depends=(e2fsprogs util-linux coreutils kbd less vpkg veyra-installer)
+depends=(e2fsprogs util-linux coreutils kbd less vpkg veyra-installer veyra-boot)
 
 package() { :; }
