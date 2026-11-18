@@ -16,9 +16,9 @@ jobs:
       - name: iwd, ell, wireless-regdb auf kernel.org (neueste Versionen, SHA-256, Signierer)
         run: |
           set -u
-          for d in network/wireless/iwd:iwd libs/ell:ell software/network/wireless-regdb:wireless-regdb; do
+          for d in network/wireless:iwd software/network/wireless-regdb:wireless-regdb; do
             pfad=${d%%:*} name=${d##*:}
-            url=https://cdn.kernel.org/pub/linux/$pfad/
+            url=https://cdn.kernel.org/pub/$pfad/; case $pfad in network/*) url=https://cdn.kernel.org/pub/linux/$pfad/;; esac
             echo "=== $name ($url)"
             liste=$(curl -fsSL --retry 3 "$url") || { echo "nicht ladbar"; continue; }
             neu=$(echo "$liste" | grep -o "$name-[0-9][0-9.]*\.tar\.xz\"" | tr -d '"' | sort -V | tail -3)
@@ -30,11 +30,12 @@ jobs:
             ls -l "$f"
             gpg --list-packets "${f%.xz}.sign" 2>/dev/null | grep -iE "issuer|keyid|created" | head -5
           done
-      - name: Schluessel aus kernel.org pgpkeys
+      - name: Schluessel (keys.openpgp.org, keyserver.ubuntu.com, kernel.org)
         run: |
-          for k in 06CA9F5D1DCF2659 29F7239293EF1A2C AA1BA0AC1D9C3C8E 37F5D6F48CF95DB5; do
-            echo "=== $k"
-            curl -fsSL "https://git.kernel.org/pub/scm/docs/kernel/pgpkeys.git/plain/keys/$k.asc" -o k.asc \
-              && gpg --with-colons --import-options show-only --import k.asc 2>/dev/null | grep -E '^(fpr|uid)' | head -4 \
-              || echo "nicht vorhanden"
+          for f in E932D120BC2AEC444E558F0106CA9F5D1DCF2659 3B6E3D185420C41C4145C3E929F7239293EF1A2C; do
+            echo "=== $f"
+            for u in "https://keys.openpgp.org/vks/v1/by-fingerprint/$f" "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x$f"; do
+              curl -fsSL -m 60 "$u" -o k.asc && echo "$u: $(gpg --with-colons --import-options show-only --import k.asc 2>/dev/null | grep -cE '^fpr') fpr" || echo "$u: nicht ladbar"
+            done
           done
+          curl -fsS -m 60 -o /dev/null -w "www.kernel.org %{http_code}\n" https://www.kernel.org/signature.html || true
