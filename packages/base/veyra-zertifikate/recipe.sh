@@ -7,12 +7,13 @@
 # Laden: build/scripts/fetch-extra.sh (vpkg-build selbst laedt nichts herunter).
 pkgname=veyra-zertifikate
 pkgver=2026.10.23
-pkgrel=1
+pkgrel=2
 pkgdesc="Wurzelzertifikate (Mozilla-CA-Buendel) fuer https"
 license=MPL-2.0
 url=https://github.com/certifi/python-certifi
 sources=(https://files.pythonhosted.org/packages/fd/11/b524cbd9bbdaca58608e4cf4053fd463417549e1959fa8d3aa18319f9555/certifi-2026.10.23.tar.gz)
 sha256sums=(a9895e6e2758b371e0545e321a3a8fd1fcfd9829ada8824a936dfb16aaaf36cd)
+groups=(veyra-network)
 depends=(openssl)
 
 package() {

@@ -7,10 +7,11 @@
 # deshalb keine LLMNR- und mDNS-Anfragen (sonst offen auf Port 5355/5353 jeder Karte).
 pkgname=veyra-netzwerk
 pkgver=0.2
-pkgrel=1
+pkgrel=2
 pkgdesc="Netzwerk-Grundeinstellung (DHCP ueber Kabel, Namensaufloesung)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
+groups=(veyra-network)
 depends=(systemd)
 
 package() {

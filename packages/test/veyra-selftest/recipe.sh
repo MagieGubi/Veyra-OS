@@ -6,12 +6,12 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.9
+pkgver=0.10
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
-depends=(vpkg systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit veyra-firewall nftables)
+depends=(vpkg veyra-base veyra-network veyra-security veyra-recovery systemd bash iproute2 python veyra-netzwerk veyra-konten veyra-zertifikate veyra-sicherheit veyra-firewall nftables)
 
 package() {
   install -d "$pkgdir/usr/lib/veyra" "$pkgdir/usr/lib/systemd/system"
@@ -150,6 +150,16 @@ elif ! nft list chain inet veyra eingang 2>/dev/null | grep -q 'policy drop;' \
   log "Firewall: FEHLER (Regeln geladen, aber eingehend oder Weiterleiten nicht auf drop)"; fail=1
 else
   log "Firewall: ok (nftables, eingehend und Weiterleiten verworfen, $(nft list ruleset | grep -c accept) Ausnahmen)"
+fi
+# Paketgruppen (VPKG 0.6): die Metapakete sind installiert und tragen ihre Gruppe.
+gr=""
+for g in veyra-base veyra-network veyra-security veyra-recovery; do
+  vpkg info "$g" 2>/dev/null | grep -q "^Gruppen *: $g\$" || gr="$gr $g"
+done
+if [ -n "$gr" ]; then
+  log "Paketgruppen: FEHLER (Metapaket fehlt oder ohne Gruppe:$gr)"; fail=1
+else
+  log "Paketgruppen: ok ($(vpkg --version), Metapakete veyra-base, -network, -security, -recovery)"
 fi
 # Kernel-Haertung (veyra-sicherheit, Kernel-Fragmente veyra-50/60): jeder sysctl-Wert aus der
 # Paketdatei muss im laufenden System gelten, Yama muss aktiv sein, nftables im Kernel.

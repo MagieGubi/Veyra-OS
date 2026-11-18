@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-# vpkg 0.5: Paketverwaltung von Veyra OS (ab 0.4 mit Versionsbedingungen in depends).
+# vpkg 0.6: Paketverwaltung von Veyra OS (ab 0.4 mit Versionsbedingungen in depends,
+# ab 0.6 mit mehreren Quellen, Spiegeln, Paket-Cache und Gruppen).
 #
 # Installiert, aktualisiert und entfernt .vpkg-Pakete (Format: docs/vpkg-format.md),
 # loest Abhaengigkeiten auf und fuehrt Buch darueber, welche Datei zu welchem Paket gehoert.
 #
 #   vpkg [--root DIR] install [--repo QUELLE] [--overwrite] [--no-deps] [--no-scripts]
-#                             [--allow-downgrade] PAKET...
+#                             [--allow-downgrade] PAKET... | @GRUPPE...
 #   vpkg [--root DIR] upgrade [--repo QUELLE]
+#   vpkg [--root DIR] update | search MUSTER | clean [--alles] | repo list
 #   vpkg [--root DIR] remove [--no-deps] NAME...
 #   vpkg [--root DIR] list | info NAME | files NAME | owner PFAD | check [NAME...]
 #   vpkg [--root DIR] register PAKET.vpkg...      (schon ausgepackte Pakete eintragen)
@@ -14,8 +16,13 @@
 #   vpkg index [--stand ZAHL] VERZEICHNIS          (index.toml fuer ein Paket-Repository)
 #
 # PAKET ist eine .vpkg-Datei oder ein Paketname aus dem Repository.
-# QUELLE ist ein Verzeichnis oder eine http(s)-Adresse mit index.toml; ohne --repo gilt
-# die erste Zeile von ROOT/etc/vpkg/repo.
+# QUELLE ist ein Verzeichnis oder eine https-Adresse mit index.toml. Ohne --repo gelten die
+# Quellen aus ROOT/etc/vpkg/repos.d/*.conf (ab 0.6, je Quelle ein Name und eine Liste von
+# Spiegeln, siehe docs/vpkg-format.md), sonst die erste Zeile von ROOT/etc/vpkg/repo.
+# Spiegel werden der Reihe nach versucht; einer mit ungueltiger Signatur oder aelterem Stand
+# wird uebersprungen. Pakete aus dem Netz landen in ROOT/var/cache/vpkg/pakete und werden vor
+# jeder Nutzung gegen den Index geprueft; ein abgebrochener Download bleibt als .teil liegen
+# und wird nie benutzt. @GRUPPE installiert alle Pakete, die im Index die Gruppe tragen.
 #
 # Signaturen: Liegen oeffentliche Schluessel in ROOT/etc/vpkg/keys/*.pem (oder wird
 # --pubkey angegeben), muss jedes Paket eine gueltige Ed25519-Signatur PAKET.vpkg.sig haben.
@@ -45,7 +52,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "0.5"
+VERSION = "0.6"
 DB = "var/lib/vpkg"
 TXN = DB + "/txn"
 REPO_STAND = DB + "/repo-stand.json"
@@ -54,6 +61,8 @@ MODE_RE = re.compile(r"^[0-7]{1,4}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 KEYS = "etc/vpkg/keys"
 REPO_FILE = "etc/vpkg/repo"
+REPOS_D = "etc/vpkg/repos.d"
+CACHE = "var/cache/vpkg"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9+._-]*$")
 # Abhaengigkeit: Name, optional mit Versionsbedingung (glibc>=2.42, vpkg=0.4-1, foo<2).
 # Ohne "-" in der Version zaehlt nur die Version, mit "-" Version und Release.
@@ -206,7 +215,7 @@ class Paket:
                 raise Fehler(f"{self.path}: Manifest ohne gueltige Angabe '{k}'")
         if not valid_deps(m.get("depends", [])):
             raise Fehler(f"{self.path}: Manifest: ungueltige Liste 'depends'")
-        for k in ("provides", "conflicts"):
+        for k in ("provides", "conflicts", "groups"):
             v = m.get(k, [])
             if not isinstance(v, list) or not all(isinstance(x, str) and NAME_RE.match(x) for x in v):
                 raise Fehler(f"{self.path}: Manifest: ungueltige Liste '{k}'")
@@ -596,9 +605,41 @@ class _NurHttps(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NurHttps)
 
 
+def lies_index(label, idx, sig, keys):
+    """Prueft Signatur und Aufbau eines Repository-Index; liefert (Pakete, Stand, signiert)."""
+    signed = False
+    if keys:
+        if sig is None:
+            raise Fehler(f"{label}: Repository-Index ist nicht signiert (index.toml.sig fehlt, "
+                         "Schluessel sind eingerichtet)")
+        if not signature_ok(idx, sig, keys):
+            raise Fehler(f"{label}: Signatur des Repository-Index ungueltig")
+        signed = True
+    try:
+        with open(idx, "rb") as f:
+            data = tomllib.load(f)
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+        raise Fehler(f"{label}: Repository-Index nicht lesbar ({e})")
+    pkgs = Repo.check_index(label, data)
+    stand = data.get("stand")
+    if signed and stand is None:
+        raise Fehler(f"{label}: signierter Repository-Index ohne Stand (stand = ...)")
+    return pkgs, stand, signed
+
+
+def schreibe_atomar(src, ziel):
+    """Kopiert src nach ziel, ohne dass je eine halbe Datei unter dem Namen ziel liegt."""
+    os.makedirs(os.path.dirname(ziel), exist_ok=True)
+    teil = ziel + ".teil"
+    shutil.copyfile(src, teil)
+    os.replace(teil, ziel)
+
+
 class Repo:
-    def __init__(self, src, tmp, system=None):
+    def __init__(self, src, tmp, system=None, stand_key=None, cache=None):
         self.src = src.rstrip("/")
+        self.stand_key = stand_key or self.src
+        self.cache = cache
         scheme = urllib.parse.urlparse(self.src).scheme
         if scheme == "http":
             raise Fehler(f"{self.src}: Repositories im Netz nur ueber https (Index und Pakete sind "
@@ -606,63 +647,48 @@ class Repo:
         if scheme not in ("", "https"):
             raise Fehler(f"{self.src}: unbekannte Repository-Adresse (erlaubt: Verzeichnis oder https)")
         self.remote = scheme == "https"
-        self.tmp = tmp
-        idx = self.fetch("index.toml")
+        self.tmp = tempfile.mkdtemp(dir=tmp)
         keys = system.keys if system else []
-        self.signed = False
-        if keys:
-            sig = self.fetch("index.toml.sig", optional=True)
-            if sig is None:
-                raise Fehler(f"{self.src}: Repository-Index ist nicht signiert (index.toml.sig fehlt, "
-                             "Schluessel sind eingerichtet)")
-            if not signature_ok(idx, sig, keys):
-                raise Fehler(f"{self.src}: Signatur des Repository-Index ungueltig")
-            self.signed = True
-        try:
-            with open(idx, "rb") as f:
-                data = tomllib.load(f)
-        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
-            raise Fehler(f"{self.src}: Repository-Index nicht lesbar ({e})")
-        self.pkgs = self.check_index(data)
-        self.stand = data.get("stand")
-        if self.signed and self.stand is None:
-            raise Fehler(f"{self.src}: signierter Repository-Index ohne Stand (stand = ...)")
+        self.idx = self.fetch("index.toml")
+        self.sig = self.fetch("index.toml.sig", optional=True) if keys else None
+        self.pkgs, self.stand, self.signed = lies_index(self.src, self.idx, self.sig, keys)
         if system is not None and self.stand is not None:
             self.check_stand(system)
 
-    def check_index(self, data):
+    @staticmethod
+    def check_index(label, data):
         """Prueft Aufbau und Werte des Index, bevor etwas daraus benutzt wird."""
         if data.get("format") != 1:
-            raise Fehler(f"{self.src}: unbekanntes Index-Format {data.get('format')!r}")
+            raise Fehler(f"{label}: unbekanntes Index-Format {data.get('format')!r}")
         st = data.get("stand")
         if st is not None and (not isinstance(st, int) or isinstance(st, bool) or st < 0):
-            raise Fehler(f"{self.src}: ungueltiger Index-Stand {st!r}")
+            raise Fehler(f"{label}: ungueltiger Index-Stand {st!r}")
         entries = data.get("package", [])
         if not isinstance(entries, list):
-            raise Fehler(f"{self.src}: Index: 'package' ist keine Liste")
+            raise Fehler(f"{label}: Index: 'package' ist keine Liste")
         pkgs = {}
         for e in entries:
             if not isinstance(e, dict):
-                raise Fehler(f"{self.src}: Index: ungueltiger Eintrag")
+                raise Fehler(f"{label}: Index: ungueltiger Eintrag")
             n = e.get("name")
             if not isinstance(n, str) or not NAME_RE.match(n):
-                raise Fehler(f"{self.src}: Index: ungueltiger Paketname {n!r}")
+                raise Fehler(f"{label}: Index: ungueltiger Paketname {n!r}")
             if n in pkgs:
-                raise Fehler(f"{self.src}: Index: {n} steht doppelt drin")
+                raise Fehler(f"{label}: Index: {n} steht doppelt drin")
             fn = e.get("filename")
             if not isinstance(fn, str) or not FILENAME_RE.match(fn):
-                raise Fehler(f"{self.src}: Index: {n}: ungueltiger Dateiname {fn!r}")
+                raise Fehler(f"{label}: Index: {n}: ungueltiger Dateiname {fn!r}")
             if not isinstance(e.get("sha256"), str) or not SHA_RE.match(e["sha256"]):
-                raise Fehler(f"{self.src}: Index: {n}: ungueltige Pruefsumme")
+                raise Fehler(f"{label}: Index: {n}: ungueltige Pruefsumme")
             for k in ("version", "release"):
                 if not isinstance(e.get(k), (str, int)) or str(e[k]) == "":
-                    raise Fehler(f"{self.src}: Index: {n}: Angabe '{k}' fehlt")
+                    raise Fehler(f"{label}: Index: {n}: Angabe '{k}' fehlt")
             if not valid_deps(e.get("depends", [])):
-                raise Fehler(f"{self.src}: Index: {n}: ungueltige Liste 'depends'")
-            for k in ("provides", "conflicts"):
+                raise Fehler(f"{label}: Index: {n}: ungueltige Liste 'depends'")
+            for k in ("provides", "conflicts", "groups"):
                 v = e.get(k, [])
                 if not isinstance(v, list) or not all(isinstance(x, str) and NAME_RE.match(x) for x in v):
-                    raise Fehler(f"{self.src}: Index: {n}: ungueltige Liste '{k}'")
+                    raise Fehler(f"{label}: Index: {n}: ungueltige Liste '{k}'")
             pkgs[n] = e
         return pkgs
 
@@ -678,14 +704,14 @@ class Repo:
             seen = {}
         except ValueError:
             raise Fehler(f"/{REPO_STAND} ist beschaedigt (bitte pruefen)")
-        old = seen.get(self.src)
+        old = seen.get(self.stand_key)
         if isinstance(old, int) and self.stand < old:
             raise Fehler(f"{self.src}: Repository-Index ist aelter als der zuletzt angenommene "
                          f"(Stand {self.stand} < {old}); veraltete oder zurueckgespielte Kopie?")
         if self.signed and (old is None or self.stand > old):
             # Nur signierte Staende merken: sonst koennte ein unsignierter Index mit riesigem
             # Stand kuenftige Aktualisierungen blockieren.
-            seen[self.src] = self.stand
+            seen[self.stand_key] = self.stand
             tmp = f + ".neu"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(seen, fh, indent=1, sort_keys=True)
@@ -702,62 +728,286 @@ class Repo:
                 raise Fehler(f"im Repository fehlt {name}")
             return p
         out = os.path.join(self.tmp, "dl-" + name)
-        grenze = MAX_PAKET if name.endswith(".vpkg") else MAX_META
-        try:
-            with _OPENER.open(f"{self.src}/{urllib.parse.quote(name)}", timeout=60) as r, \
-                    open(out, "wb") as f:
-                n = 0
-                while True:
-                    block = r.read(1 << 20)
-                    if not block:
-                        break
-                    n += len(block)
-                    if n > grenze:
-                        raise Fehler(f"{name} ist groesser als erlaubt ({grenze >> 20} MiB)")
-                    f.write(block)
-        except Fehler as e:
-            raise Fehler(f"Download abgelehnt: {name}: {e}")
-        except Exception as e:  # noqa: BLE001 - jede Netzwerkursache gleich melden
-            if optional and isinstance(e, urllib.error.HTTPError) and e.code == 404:
-                return None
-            raise Fehler(f"Download fehlgeschlagen: {name} ({e})")
-        return out
+        return download(self.src, name, out, optional)
 
-    def get(self, name):
+    def get(self, name, spiegel=()):
+        """Paketdatei zum Index-Eintrag name; bei Netz-Quellen ueber den Cache. Scheitert der
+        Download, kommen die weiteren Spiegel dran (die Pruefsumme stammt aus dem Index)."""
         e = self.pkgs[name]
-        path = self.fetch(e["filename"])
-        if sha256_file(path) != e["sha256"]:
-            raise Fehler(f"{e['filename']}: SHA-256 passt nicht zum Repository-Index")
-        sig = self.fetch(e["filename"] + ".sig", optional=True)
-        if sig and self.remote:
-            os.replace(sig, path + ".sig")
-        return path
+        fn = e["filename"]
+        if not self.remote or not self.cache:
+            path = self.fetch(fn)
+            if sha256_file(path) != e["sha256"]:
+                raise Fehler(f"{fn}: SHA-256 passt nicht zum Repository-Index")
+            sig = self.fetch(fn + ".sig", optional=True)
+            if sig and self.remote:
+                os.replace(sig, path + ".sig")
+            return path
+        os.makedirs(self.cache, exist_ok=True)
+        ziel = os.path.join(self.cache, fn)
+        if os.path.isfile(ziel):
+            if sha256_file(ziel) == e["sha256"]:
+                info(f"   {fn} aus dem Cache")
+            else:
+                warn(f"{fn} im Cache passt nicht zum Index, wird neu geladen")
+                os.unlink(ziel)
+                if os.path.exists(ziel + ".sig"):
+                    os.unlink(ziel + ".sig")
+        fehler = []
+        for base in [self.src, *[m for m in spiegel if m.rstrip("/") != self.src]]:
+            base = base.rstrip("/")
+            if not os.path.isfile(ziel):
+                teil = ziel + ".teil"
+                try:
+                    download(base, fn, teil)
+                except Fehler as ex:
+                    if os.path.exists(teil):
+                        os.unlink(teil)
+                    fehler.append(str(ex))
+                    continue
+                if sha256_file(teil) != e["sha256"]:
+                    os.unlink(teil)
+                    fehler.append(f"{fn}: SHA-256 passt nicht zum Repository-Index ({base})")
+                    continue
+                os.replace(teil, ziel)
+            if not os.path.isfile(ziel + ".sig"):
+                teil = ziel + ".sig.teil"
+                try:
+                    if download(base, fn + ".sig", teil, optional=True):
+                        os.replace(teil, ziel + ".sig")
+                except Fehler as ex:
+                    if os.path.exists(teil):
+                        os.unlink(teil)
+                    fehler.append(str(ex))
+                    continue
+            return ziel
+        raise Fehler("; ".join(fehler))
+
+
+def download(base, name, out, optional=False):
+    """Laedt base/name nach out (nur https, mit Groessengrenze). Bei Fehlern bleibt out
+    unvollstaendig liegen; der Aufrufer entscheidet, was damit geschieht."""
+    grenze = MAX_PAKET if name.endswith(".vpkg") else MAX_META
+    try:
+        with _OPENER.open(f"{base}/{urllib.parse.quote(name)}", timeout=60) as r, \
+                open(out, "wb") as f:
+            n = 0
+            while True:
+                block = r.read(1 << 20)
+                if not block:
+                    break
+                n += len(block)
+                if n > grenze:
+                    raise Fehler(f"{name} ist groesser als erlaubt ({grenze >> 20} MiB)")
+                f.write(block)
+            laenge = r.headers.get("Content-Length")
+            if laenge is not None and laenge.isdigit() and int(laenge) != n:
+                raise Fehler(f"unvollstaendig ({n} von {laenge} Bytes)")
+    except Fehler as e:
+        raise Fehler(f"Download abgelehnt: {name}: {e}")
+    except Exception as e:  # noqa: BLE001 - jede Netzwerkursache gleich melden
+        if optional and isinstance(e, urllib.error.HTTPError) and e.code == 404:
+            return None
+        raise Fehler(f"Download fehlgeschlagen: {name} ({e})")
+    return out
+
+
+class Quelle:
+    """Eine eingerichtete Quelle mit Namen und Spiegeln. Der erste Spiegel, dessen Index die
+    Pruefung besteht (Signatur, Stand nicht aelter als zuletzt angenommen), gilt; Pakete kommen
+    in den Cache und notfalls von den anderen Spiegeln."""
+
+    def __init__(self, name, mirrors, tmp, system, stand_key=None):
+        self.name, self.mirrors = name, mirrors
+        self.repo = None
+        fehler = []
+        for m in mirrors:
+            try:
+                self.repo = Repo(m, tmp, system, stand_key=stand_key or f"quelle:{name}",
+                                 cache=system.path(CACHE + "/pakete"))
+                break
+            except Fehler as e:
+                warn(f"{name}: Spiegel {m} uebersprungen: {e}")
+                fehler.append(str(e))
+        if self.repo is None:
+            raise Fehler(f"Quelle {name}: kein Spiegel brauchbar")
+        self.pkgs = self.repo.pkgs
+        # Den geprueften Index fuer search und repo list aufheben.
+        d = system.path(f"{CACHE}/index/{name}")
+        schreibe_atomar(self.repo.idx, os.path.join(d, "index.toml"))
+        if self.repo.sig:
+            schreibe_atomar(self.repo.sig, os.path.join(d, "index.toml.sig"))
+        elif os.path.exists(os.path.join(d, "index.toml.sig")):
+            os.unlink(os.path.join(d, "index.toml.sig"))
+
+    def get(self, n):
+        return self.repo.get(n, self.mirrors)
+
+
+class Quellen:
+    """Mehrere Quellen zusammen: bei gleichem Paketnamen gilt die zuerst eingerichtete."""
+
+    def __init__(self, quellen):
+        self.quellen = quellen
+        self.pkgs, self.herkunft = {}, {}
+        for q in quellen:
+            for n, e in q.pkgs.items():
+                if n not in self.pkgs:
+                    self.pkgs[n], self.herkunft[n] = e, q
+
+    def get(self, n):
+        return self.herkunft[n].get(n)
 
 
 class LazyRepo:
     """Laedt (und prueft) den Repository-Index erst, wenn er gebraucht wird: eine lokale
     Paketdatei ohne fehlende Abhaengigkeiten kommt ohne Repository aus."""
 
-    def __init__(self, src, tmp, system):
-        self._args = (src, tmp, system)
+    def __init__(self, make):
+        self._make = make
         self._repo = None
 
     def __getattr__(self, name):
         if self._repo is None:
-            self._repo = Repo(*self._args)
+            self._repo = self._make()
         return getattr(self._repo, name)
 
 
-def repo_source(args, system):
-    if args.repo:
-        return args.repo
+def eingerichtete_quellen(system):
+    """[(Name, [Spiegel...], Stand-Schluessel)] aus repos.d, sonst aus etc/vpkg/repo."""
+    d = system.path(REPOS_D)
+    out = []
+    if os.path.isdir(d):
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith(".conf"):
+                continue
+            pfad = os.path.join(d, fn)
+            try:
+                with open(pfad, "rb") as f:
+                    c = tomllib.load(f)
+            except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+                raise Fehler(f"/{REPOS_D}/{fn} nicht lesbar ({e})")
+            name, mirrors = c.get("name"), c.get("mirrors")
+            if not isinstance(name, str) or not NAME_RE.match(name):
+                raise Fehler(f"/{REPOS_D}/{fn}: ungueltiger Name {name!r}")
+            if not isinstance(mirrors, list) or not mirrors or \
+                    not all(isinstance(m, str) and m for m in mirrors):
+                raise Fehler(f"/{REPOS_D}/{fn}: 'mirrors' muss eine nicht leere Liste von Adressen sein")
+            if any(n == name for n, _, _ in out):
+                raise Fehler(f"/{REPOS_D}/{fn}: Quelle {name} ist doppelt eingerichtet")
+            out.append((name, mirrors, None))
+    if out:
+        return out
     f = system.path(REPO_FILE)
     if os.path.isfile(f):
         for line in open(f):
             line = line.strip()
             if line and not line.startswith("#"):
-                return line
-    return None
+                # Alte Einrichtung: Stand weiter unter der Adresse merken (wie bis 0.5).
+                return [("standard", [line], line.rstrip("/"))]
+    return []
+
+
+def repo_fuer(args, system, tmp):
+    """Repository fuer install/upgrade: --repo QUELLE oder alle eingerichteten Quellen."""
+    if args.repo:
+        return LazyRepo(lambda: Repo(args.repo, tmp, system))
+    qs = eingerichtete_quellen(system)
+    if not qs:
+        return None
+    return LazyRepo(lambda: Quellen([Quelle(n, m, tmp, system, k) for n, m, k in qs]))
+
+
+def gruppen_aufloesen(wanted, repo):
+    out = []
+    for w in wanted:
+        if not w.startswith("@"):
+            out.append(w)
+            continue
+        if repo is None:
+            raise Fehler(f"{w}: Gruppen gibt es nur mit Repository (--repo oder /{REPOS_D})")
+        mitglieder = sorted(n for n, e in repo.pkgs.items() if w[1:] in e.get("groups", []))
+        if not mitglieder:
+            raise Fehler(f"{w}: keine Pakete mit dieser Gruppe im Repository")
+        info(f"{w}: {', '.join(mitglieder)}")
+        out.extend(m for m in mitglieder if m not in out)
+    return out
+
+
+def cmd_update(args, system):
+    qs = eingerichtete_quellen(system)
+    if not qs:
+        raise Fehler(f"keine Quelle eingerichtet (/{REPOS_D}/*.conf oder /{REPO_FILE})")
+    system.lock()
+    with tempfile.TemporaryDirectory(prefix="vpkg.") as tmp:
+        for n, m, k in qs:
+            q = Quelle(n, m, tmp, system, k)
+            info(f"{n}: {len(q.pkgs)} Pakete, Stand {q.repo.stand}, von {q.repo.src}")
+    return 0
+
+
+def zwischengespeicherte(system):
+    """[(Name, Spiegel, Pakete, Stand)] aus dem Cache; jeder Index wird erneut geprueft."""
+    out = []
+    for n, m, _ in eingerichtete_quellen(system):
+        d = system.path(f"{CACHE}/index/{n}")
+        idx = os.path.join(d, "index.toml")
+        if not os.path.isfile(idx):
+            out.append((n, m, None, None))
+            continue
+        sig = os.path.join(d, "index.toml.sig")
+        pkgs, stand, _ = lies_index(f"Cache {n}", idx, sig if os.path.isfile(sig) else None,
+                                    system.keys)
+        out.append((n, m, pkgs, stand))
+    return out
+
+
+def cmd_search(args, system):
+    muster = args.muster.lower()
+    qs = zwischengespeicherte(system)
+    if not qs or all(p is None for _, _, p, _ in qs):
+        raise Fehler("kein Paketindex im Cache (erst vpkg update)")
+    gefunden = 0
+    for n, _, pkgs, _ in qs:
+        for name, e in sorted((pkgs or {}).items()):
+            text = " ".join([name, str(e.get("description", "")), *e.get("groups", [])]).lower()
+            if muster in text:
+                gefunden += 1
+                inst = system.installed.get(name)
+                mark = f" [installiert {fullver(inst)}]" if inst else ""
+                gr = f" (@{', @'.join(e['groups'])})" if e.get("groups") else ""
+                print(f"{n}/{name} {fullver(e)}{mark}{gr}\n    {e.get('description', '')}")
+    if not gefunden:
+        info(f"Nichts gefunden: {args.muster}")
+        return 1
+    return 0
+
+
+def cmd_clean(args, system):
+    system.lock()
+    frei = 0
+    dirs = [system.path(CACHE + "/pakete")] + ([system.path(CACHE + "/index")] if args.alles else [])
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for wurzel, _, fs in os.walk(d):
+            frei += sum(os.lstat(os.path.join(wurzel, f)).st_size for f in fs)
+        shutil.rmtree(d)
+    info(f"Cache geleert ({frei >> 10} KiB frei)")
+    return 0
+
+
+def cmd_repo(args, system):
+    qs = zwischengespeicherte(system)
+    if not qs:
+        info(f"keine Quelle eingerichtet (/{REPOS_D}/*.conf oder /{REPO_FILE})")
+        return 0
+    for n, m, pkgs, stand in qs:
+        stand_txt = f"Stand {stand}, {len(pkgs)} Pakete" if pkgs is not None else "noch kein vpkg update"
+        print(f"{n}: {stand_txt}")
+        for x in m:
+            print(f"    {x}")
+    return 0
 
 
 def cmd_index(args):
@@ -790,6 +1040,8 @@ def cmd_index(args):
             f.write(f"description = {toml_str(m.get('description', ''))}\n")
             for k in ("depends", "provides", "conflicts"):
                 f.write(f"{k} = [{', '.join(toml_str(x) for x in m.get(k, []))}]\n")
+            if m.get("groups"):
+                f.write(f"groups = [{', '.join(toml_str(x) for x in m['groups'])}]\n")
             f.write(f"filename = {toml_str(fn)}\nsha256 = {toml_str(sha)}\n")
     os.replace(os.path.join(d, "index.toml.neu"), os.path.join(d, "index.toml"))
     info(f"index.toml: {len(entries)} Pakete")
@@ -821,7 +1073,7 @@ def resolve(system, wanted, repo, tmp, no_deps):
             load(os.path.abspath(w))
         else:
             if repo is None:
-                raise Fehler(f"{w}: kein Repository angegeben (--repo oder {REPO_FILE})")
+                raise Fehler(f"{w}: kein Repository angegeben (--repo, /{REPOS_D} oder /{REPO_FILE})")
             if w not in repo.pkgs:
                 raise Fehler(f"{w}: nicht im Repository")
             load(repo.get(w), w)
@@ -1057,12 +1309,11 @@ def run_pre_remove(system, name):
 def cmd_install(args, system, upgrade_only=False):
     system.lock()
     with tempfile.TemporaryDirectory(prefix="vpkg.") as tmp:
-        src = repo_source(args, system)
-        repo = LazyRepo(src, tmp, system) if src else None
-        wanted = args.packages
+        repo = repo_fuer(args, system, tmp)
+        wanted = gruppen_aufloesen(args.packages, repo)
         if upgrade_only:
             if repo is None:
-                raise Fehler(f"upgrade braucht ein Repository (--repo oder {REPO_FILE})")
+                raise Fehler(f"upgrade braucht ein Repository (--repo, /{REPOS_D} oder /{REPO_FILE})")
             wanted = [n for n, m in system.installed.items()
                       if n in repo.pkgs and vercmp(fullver(repo.pkgs[n]), fullver(m)) > 0]
             if not wanted:
@@ -1185,6 +1436,7 @@ def cmd_info(args, system):
             ("Haengt ab von", ", ".join(m.get("depends", [])) or "-"),
             ("Stellt bereit", ", ".join(m.get("provides", [])) or "-"),
             ("Konflikte", ", ".join(m.get("conflicts", [])) or "-"),
+            ("Gruppen", ", ".join(m.get("groups", [])) or "-"),
             ("Gebraucht von", ", ".join(rdeps) or "-"),
             ("Dateien", str(sum(1 for e in m.get("file", []) if e["type"] != "dir"))),
             ("Install-Skript", "ja" if "install_sha256" in m else "nein"),
@@ -1317,7 +1569,8 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def inst_opts(p):
-        p.add_argument("--repo", help="Verzeichnis oder http(s)-Adresse mit index.toml")
+        p.add_argument("--repo", help="Verzeichnis oder https-Adresse mit index.toml "
+                       "(statt der eingerichteten Quellen)")
         p.add_argument("--overwrite", action="store_true", help="Dateikonflikte ueberschreiben")
         p.add_argument("--no-deps", action="store_true", help="Abhaengigkeiten nicht pruefen")
         p.add_argument("--no-scripts", action="store_true", help="Install-Skripte nicht ausfuehren")
@@ -1348,6 +1601,13 @@ def main(argv=None):
     p.add_argument("--strict", action="store_true", help="Abweichungen als Fehler werten")
     p.add_argument("packages", nargs="+")
     sub.add_parser("recover", help="unterbrochenen Vorgang zuruecknehmen")
+    sub.add_parser("update", help="Paketindex aller Quellen holen und pruefen")
+    p = sub.add_parser("search", help="Pakete im Index suchen (Name, Beschreibung, Gruppe)")
+    p.add_argument("muster")
+    p = sub.add_parser("clean", help="heruntergeladene Pakete aus dem Cache loeschen")
+    p.add_argument("--alles", action="store_true", help="auch die gespeicherten Paketindizes")
+    p = sub.add_parser("repo", help="eingerichtete Quellen")
+    p.add_argument("aktion", choices=["list"])
     p = sub.add_parser("index", help="index.toml fuer ein Repository-Verzeichnis schreiben")
     p.add_argument("--stand", type=int,
                    help="Stand des Index (Zahl, muss mit jeder Ausgabe steigen; Standard: "
@@ -1371,7 +1631,8 @@ def main(argv=None):
             return 0
         return {"remove": cmd_remove, "list": cmd_list, "info": cmd_info, "files": cmd_files,
                 "owner": cmd_owner, "check": cmd_check, "register": cmd_register,
-                "rerun-script": cmd_rerun_script}[args.cmd](args, system)
+                "rerun-script": cmd_rerun_script, "update": cmd_update, "search": cmd_search,
+                "clean": cmd_clean, "repo": cmd_repo}[args.cmd](args, system)
     except Fehler as e:
         print(f"vpkg: {e}", file=sys.stderr)
         return 1

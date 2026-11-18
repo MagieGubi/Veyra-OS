@@ -1,4 +1,4 @@
-# VPKG 0.5: Bedienung
+# VPKG 0.6: Bedienung
 
 `vpkg` ist die Paketverwaltung von Veyra OS (`packages/base/vpkg/vpkg`, Python 3.11+,
 nur Standardbibliothek, dazu `zstd`, `tar` und `openssl`). Sie installiert, aktualisiert
@@ -7,8 +7,12 @@ weiß zu jeder Datei, zu welchem Paket sie gehört.
 
 | Befehl | Was er tut |
 | --- | --- |
-| `vpkg install PAKET...` | `.vpkg`-Dateien oder Namen aus dem Repository installieren; fehlende Abhängigkeiten kommen aus dem Repository dazu. Ist ein Paket schon installiert, wird es aktualisiert (alte Dateien, die in der neuen Version fehlen, werden entfernt). Eine ältere Version als die installierte nur mit `--allow-downgrade`. |
+| `vpkg install PAKET...` | `.vpkg`-Dateien, Namen aus dem Repository oder `@GRUPPE` (alle Pakete der Gruppe, ab 0.6) installieren; fehlende Abhängigkeiten kommen aus dem Repository dazu. Ist ein Paket schon installiert, wird es aktualisiert (alte Dateien, die in der neuen Version fehlen, werden entfernt). Eine ältere Version als die installierte nur mit `--allow-downgrade`. |
 | `vpkg upgrade` | Alle installierten Pakete, für die das Repository eine neuere Version hat, aktualisieren. |
+| `vpkg update` | Index aller eingerichteten Quellen holen, prüfen und im Cache ablegen (ab 0.6). |
+| `vpkg search MUSTER` | Im gespeicherten Index nach Name, Beschreibung oder Gruppe suchen (ab 0.6). |
+| `vpkg clean [--alles]` | Heruntergeladene Pakete aus `/var/cache/vpkg` löschen, mit `--alles` auch die gespeicherten Indizes (ab 0.6). |
+| `vpkg repo list` | Eingerichtete Quellen mit Spiegeln und Stand des gespeicherten Index (ab 0.6). |
 | `vpkg remove NAME...` | Pakete entfernen. Abgelehnt, solange ein anderes Paket sie braucht. Führt vorher `pre_remove` aus; scheitert es, wird nichts entfernt (`--no-scripts`: ohne Skript). |
 | `vpkg list` | Installierte Pakete mit Version. |
 | `vpkg info NAME` | Beschreibung, Abhängigkeiten, wer das Paket braucht. |
@@ -91,8 +95,9 @@ bleibt die geänderte Datei als `DATEI.vpkgsave`.
 ## Repository
 
 Ein Repository ist ein Verzeichnis (oder eine https-Adresse) mit `.vpkg`-Dateien,
-den zugehörigen `.sig`-Dateien und einem `index.toml` von `vpkg index`. Die Quelle steht
-in `/etc/vpkg/repo` oder wird mit `--repo` angegeben. Das CI stellt bei jedem Lauf ein
+den zugehörigen `.sig`-Dateien und einem `index.toml` von `vpkg index`. Die Quellen stehen
+ab 0.6 in `/etc/vpkg/repos.d/*.conf` (siehe unten), sonst in `/etc/vpkg/repo`; `--repo`
+nimmt einmalig eine andere Quelle. Das CI stellt bei jedem Lauf ein
 Repository mit allen Paketen als Artefakt `veyra-repo` bereit; öffentlich gehostet ist
 es noch nicht.
 
@@ -116,14 +121,46 @@ Ab VPKG 0.3 ist auch der Index geschützt (Aufbau: [vpkg-format.md](vpkg-format.
 - Das Repository wird erst geladen, wenn es gebraucht wird (Paketname oder fehlende
   Abhängigkeit). Eine lokale Paketdatei installiert sich auch ohne erreichbares Repository.
 
+## Quellen, Spiegel, Cache, Gruppen (ab 0.6)
+
+Eine Datei je Quelle, zum Beispiel `/etc/vpkg/repos.d/veyra.conf`:
+
+```toml
+name = "veyra"
+mirrors = ["https://spiegel-1.example/veyra", "https://spiegel-2.example/veyra"]
+```
+
+- **Spiegel** werden der Reihe nach versucht. Ein Spiegel, der nicht antwortet, einen
+  unsignierten oder veränderten Index liefert oder einen älteren Stand als den zuletzt
+  angenommenen, wird mit Warnung übersprungen. Der Stand wird je Quelle gemerkt
+  (`quelle:NAME` in `repo-stand.json`), gilt also für alle ihre Spiegel. Liefert kein
+  Spiegel einen gültigen Index, bricht VPKG ab und ändert nichts.
+- Mehrere Quellen: Dateien in alphabetischer Reihenfolge; gibt es ein Paket in mehreren
+  Quellen, gilt die erste.
+- **Cache:** Pakete aus dem Netz landen in `/var/cache/vpkg/pakete`. Vor jeder Nutzung
+  wird ihr SHA-256 gegen den Index geprüft; ein abweichendes Paket wird gelöscht und neu
+  geladen. Ein Download läuft in eine Datei `NAME.teil`, die erst nach erfolgreicher
+  Prüfung umbenannt wird; ein abgebrochener Download (auch ein zu kurzer laut
+  `Content-Length`) wird verworfen, und der nächste Spiegel kommt dran. Geprüfte Indizes
+  liegen unter `/var/cache/vpkg/index/NAME/`; `search` und `repo list` prüfen deren
+  Signatur bei jedem Lesen erneut.
+- `install` und `upgrade` holen den Index jedes Mal frisch (wie bisher); `update` braucht
+  es nur für `search` und `repo list`.
+- **Gruppen:** Ein Paket nennt seine Gruppen im Manifest (`groups = [...]`, im Rezept
+  `groups=(...)`), `vpkg index` übernimmt sie. `vpkg install @veyra-security` installiert alle
+  Pakete der Gruppe. Dazu gibt es **Metapakete** ohne eigene Dateien, die ihre Gruppe über
+  Abhängigkeiten vollständig nachziehen: `veyra-base`, `veyra-network`, `veyra-security`,
+  `veyra-development` (Compiler, nur auf Wunsch), `veyra-recovery`.
+
 ## Datenbank
 
 `/var/lib/vpkg/installed/NAME/manifest.toml` (und `install`, falls vorhanden) je
 installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgänge,
 `/var/lib/vpkg/txn/` gibt es nur während eines Vorgangs (siehe Transaktionen),
-`/var/lib/vpkg/repo-stand.json` hält den zuletzt angenommenen Index-Stand je Quelle.
+`/var/lib/vpkg/repo-stand.json` hält den zuletzt angenommenen Index-Stand je Quelle,
+`/var/cache/vpkg/` den Paket- und Index-Cache (darf jederzeit gelöscht werden).
 
-## Grenzen von 0.5
+## Grenzen von 0.6
 
 - Install-Skripte lassen sich nicht zurücknehmen (siehe oben).
 - Die Transaktion schützt vor Abbrüchen, nicht vor Fremdeingriffen: wer während eines
@@ -132,6 +169,7 @@ installiertem Paket. `/var/lib/vpkg/lock` verhindert zwei gleichzeitige Vorgäng
   nicht ältere als die schon gesehenen ausliefern). Ein Ablaufdatum braucht eine
   verlässliche Uhrzeit im System und folgt später.
 - Ohne Schlüssel in `/etc/vpkg/keys` wird weder Index noch Paket auf Signaturen geprüft.
-- Keine Paketgruppen oder Metapakete; Abruf nur aus einem lokalen
-  Verzeichnis oder einer Adresse ohne Mirror-Liste und Cache.
+- Es gibt noch kein öffentlich gehostetes Repository; eingerichtet ist im Abbild deshalb
+  keine Quelle (Pakete und Index kommen pro CI-Lauf als Artefakt).
+- Spiegel werden nicht gegeneinander abgeglichen: es zählt der erste gültige.
 - Kernel und Kernelmodule sind noch kein Paket.

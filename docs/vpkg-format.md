@@ -165,3 +165,12 @@ oder `name>ver` enthalten; `ver` mit `-` vergleicht Version und Release. `provid
 „ungültige Liste 'depends'“ ab. Deshalb zuerst `vpkg` 0.4 installieren, danach Pakete
 mit Bedingungen. Bisher nutzt kein Veyra-Paket Bedingungen; sie kommen erst mit den
 ersten Paketen, die sie brauchen.
+
+## Gruppen (ab VPKG 0.6)
+
+Manifest und Index-Eintrag dürfen eine Liste `groups = ["veyra-security"]` enthalten
+(Namen wie Paketnamen). `vpkg-build` schreibt das Feld nur, wenn das Rezept `groups=(...)`
+setzt; Pakete ohne Gruppe bleiben bit-gleich zu vorher. Das Paketformat bleibt
+`format = 1`, weil das Feld optional ist: VPKG bis 0.5 liest es nicht und installiert
+solche Pakete trotzdem richtig (nur ohne `@gruppe`). Metapakete sind gewöhnliche Pakete
+ohne Dateien (`package() { :; }`), die ihre Gruppe über `depends` nachziehen.

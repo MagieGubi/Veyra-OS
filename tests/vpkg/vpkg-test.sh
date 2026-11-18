@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests fuer VPKG 0.5 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
+# Tests fuer VPKG 0.6 (packages/base/vpkg/vpkg) in einem leeren Zielsystem (--root).
 # Braucht python3 (3.11+), zstd, openssl. Laeuft ohne root-Rechte.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -498,6 +498,140 @@ else
 fi
 [ ! -e "$skr/usr/share/entfern/x" ] || fail "entfern nicht entfernt"
 ok "pre_remove: scheitert es, wird nichts entfernt; danach (oder mit --no-scripts) wird entfernt"
+
+# ---- Quellen mit Spiegeln, Cache, Gruppen, update/search/clean/repo list (VPKG 0.6).
+# Eigenes Zielsystem mit Schluessel; Spiegel auf einem lokalen https-Server:
+#   gut (Stand 600), alt (Stand 100, zurueckgespielte Kopie), abbruch (Index gut, Pakete brechen
+#   mitten im Download ab), fehlt (gibt es nicht).
+mr=$t/mr
+mkdir -p "$mr/etc/vpkg/keys" "$mr/etc/vpkg/repos.d"
+cp "$sr/etc/vpkg/keys/test.pem" "$mr/etc/vpkg/keys/"
+vm() { python3 "$here/packages/base/vpkg/vpkg" --root "$mr" "$@"; }
+for g in werkz1 werkz2; do
+  mkdir -p "$t/r/$g"
+  printf '%s\n' "pkgname=$g pkgver=1.0 license=MIT pkgdesc='Werkzeug $g'" "groups=(werkzeug)" \
+    "package() { install -d \"\$pkgdir/usr/share/$g\"; echo x > \"\$pkgdir/usr/share/$g/x\"; }" \
+    > "$t/r/$g/recipe.sh"
+  "$build" --srcdir "$t" --outdir "$P" "$t/r/$g" >/dev/null
+done
+grep -q '^groups = \["werkzeug"\]' <(zstd -qdc "$P/werkz1-1.0-1-x86_64.vpkg" | tar -xOf - manifest.toml) \
+  || fail "vpkg-build schreibt groups nicht ins Manifest"
+grep -q '^groups' <(zstd -qdc "$P/liba-1.0-1-x86_64.vpkg" | tar -xOf - manifest.toml) \
+  && fail "groups im Manifest eines Pakets ohne Gruppen"
+gut_pakete=(liba-1.0-1-x86_64.vpkg app-2.0-1-x86_64.vpkg werkz1-1.0-1-x86_64.vpkg werkz2-1.0-1-x86_64.vpkg)
+mkrepo "$t/m/gut" 600 "${gut_pakete[@]}"
+mkrepo "$t/m/alt" 100 liba-1.0-1-x86_64.vpkg app-1.0-1-x86_64.vpkg
+cp -r "$t/m/gut" "$t/m/abbruch"
+grep -q '^groups = \["werkzeug"\]' "$t/m/gut/index.toml" || fail "vpkg index uebernimmt groups nicht"
+python3 - "$t/m" "$t/tls.crt" "$t/tls.key" "$t/port6" <<'PYS' &
+import functools, http.server, os, ssl, sys
+wurzel, crt, key, portdatei = sys.argv[1:]
+class H(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith("/abbruch/") and self.path.endswith(".vpkg"):
+            daten = open(os.path.join(wurzel, self.path.lstrip("/")), "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(daten)))
+            self.end_headers()
+            self.wfile.write(daten[: len(daten) // 2])
+            self.wfile.flush()
+            self.close_connection = True
+            return
+        super().do_GET()
+    def log_message(self, *a):
+        pass
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(H, directory=wurzel))
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(crt, key)
+srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+open(portdatei + ".neu", "w").write(str(srv.server_address[1]))
+os.rename(portdatei + ".neu", portdatei)
+srv.serve_forever()
+PYS
+https_pid=$!
+trap 'kill "$https_pid" 2>/dev/null; rm -rf "$t"' EXIT
+for _ in $(seq 50); do [ -s "$t/port6" ] && break; sleep 0.1; done
+u=https://localhost:$(cat "$t/port6") || fail "HTTPS-Testserver (0.6) startet nicht"
+export SSL_CERT_FILE=$t/tls.crt
+quelle() { { echo 'name = "veyra"'; printf 'mirrors = ['; local m s=""; for m in "$@"; do printf '%s"%s/%s"' "$s" "$u" "$m"; s=", "; done; echo ']'; } > "$mr/etc/vpkg/repos.d/veyra.conf"; }
+cache=$mr/var/cache/vpkg
+
+abgelehnt 'erst vpkg update' vm search liba
+quelle fehlt gut
+vm update >"$t/out" 2>&1 || fail "update mit einem fehlenden Spiegel: $(cat "$t/out")"
+grep -q 'Spiegel .*/fehlt uebersprungen' "$t/out" || fail "fehlender Spiegel nicht gemeldet: $(cat "$t/out")"
+grep -q 'veyra: 4 Pakete, Stand 600' "$t/out" || fail "update meldet Stand nicht: $(cat "$t/out")"
+[ -f "$cache/index/veyra/index.toml" ] && [ -f "$cache/index/veyra/index.toml.sig" ] || fail "Index nicht im Cache"
+vm repo list >"$t/out" || fail "repo list"
+grep -qx 'veyra: Stand 600, 4 Pakete' "$t/out" || fail "repo list: $(cat "$t/out")"
+grep -q "    $u/fehlt" "$t/out" || fail "repo list ohne Spiegel: $(cat "$t/out")"
+ok "update: Spiegel der Reihe nach, fehlender Spiegel uebersprungen, Index im Cache, repo list"
+
+vm search werkzeug >"$t/out" || fail "search nach Gruppe"
+[ "$(grep -c '^veyra/werkz' "$t/out")" = 2 ] || fail "search nach Gruppe: $(cat "$t/out")"
+vm search APP | grep -q '^veyra/app 2.0-1' || fail "search nach Name (Gross/Klein)"
+abgelehnt 'Nichts gefunden' vm search gibtsnicht
+echo kaputt >> "$cache/index/veyra/index.toml"
+abgelehnt 'Signatur des Repository-Index ungueltig' vm search liba
+vm update >/dev/null 2>&1 || fail "update nach kaputtem Cache-Index"
+ok "search: Name, Beschreibung und Gruppe; veraenderter Index im Cache abgelehnt"
+
+vm install @werkzeug >"$t/out" 2>&1 || fail "Gruppe installieren: $(cat "$t/out")"
+for g in werkz1 werkz2; do vm list | grep -qx "$g 1.0-1" || fail "Gruppe nicht installiert ($g)"; done
+vm info werkz1 | grep -q '^Gruppen *: werkzeug' || fail "info zeigt Gruppe nicht"
+[ -f "$cache/pakete/werkz1-1.0-1-x86_64.vpkg" ] && [ -f "$cache/pakete/werkz1-1.0-1-x86_64.vpkg.sig" ] \
+  || fail "Paket nicht im Cache"
+abgelehnt 'keine Pakete mit dieser Gruppe' vm install @gibtsnicht
+ok "Gruppen: @gruppe installiert alle Mitglieder, info zeigt sie, unbekannte Gruppe abgelehnt"
+
+vm install app >/dev/null 2>&1 || fail "app aus der Quelle"
+vm remove app >/dev/null
+vm install app >"$t/out" 2>&1 || fail "app aus dem Cache: $(cat "$t/out")"
+grep -q 'app-2.0-1-x86_64.vpkg aus dem Cache' "$t/out" || fail "Cache nicht genutzt: $(cat "$t/out")"
+vm remove app >/dev/null
+echo boese > "$cache/pakete/app-2.0-1-x86_64.vpkg"
+vm install app >"$t/out" 2>&1 || fail "Neuladen nach kaputtem Cache: $(cat "$t/out")"
+grep -q 'passt nicht zum Index, wird neu geladen' "$t/out" || fail "kaputtes Paket im Cache nicht erkannt"
+[ "$(sha256sum < "$cache/pakete/app-2.0-1-x86_64.vpkg" | cut -d' ' -f1)" = \
+  "$(sha256sum < "$P/app-2.0-1-x86_64.vpkg" | cut -d' ' -f1)" ] || fail "Cache nicht repariert"
+ok "Cache: Paket wiederverwendet, veraendertes Paket erkannt und neu geladen"
+
+vm remove app >/dev/null && vm clean >/dev/null
+quelle abbruch
+abgelehnt 'unvollstaendig' vm install app
+! vm list | grep -q '^app ' || fail "app trotz abgebrochenem Download installiert"
+[ -z "$(ls -A "$cache/pakete" 2>/dev/null)" ] || fail "Reste eines abgebrochenen Downloads: $(ls "$cache/pakete")"
+quelle abbruch gut
+vm install app >"$t/out" 2>&1 || fail "Rueckfall auf zweiten Spiegel: $(cat "$t/out")"
+vm list | grep -qx 'app 2.0-1' || fail "app nach Rueckfall nicht installiert"
+for f in "$cache"/pakete/*.teil; do [ ! -e "$f" ] || fail ".teil-Datei liegen geblieben: $f"; done
+ok "abgebrochener Download: nichts installiert, keine Reste; naechster Spiegel liefert das Paket"
+
+quelle alt gut
+vm update >"$t/out" 2>&1 || fail "update mit veraltetem Spiegel: $(cat "$t/out")"
+grep -q 'Spiegel .*/alt uebersprungen.*aelter als der zuletzt angenommene' "$t/out" \
+  || fail "veralteter Spiegel nicht abgelehnt: $(cat "$t/out")"
+quelle alt
+abgelehnt 'kein Spiegel brauchbar' vm update
+vm upgrade >/dev/null 2>&1 && fail "upgrade nur mit veraltetem Spiegel angenommen"
+vm list | grep -qx 'app 2.0-1' || fail "veralteter Spiegel hat app veraendert"
+ok "Spiegel mit aelterem Stand wird uebersprungen; nur veraltete Spiegel: Abbruch ohne Aenderung"
+
+vm clean >"$t/out" 2>&1 || fail "clean"
+[ ! -e "$cache/pakete" ] && [ -f "$cache/index/veyra/index.toml" ] || fail "clean loescht zu viel oder zu wenig"
+vm clean --alles >/dev/null 2>&1 && [ ! -e "$cache/index" ] || fail "clean --alles"
+quelle gut
+printf 'name = "x y"\nmirrors = []\n' > "$mr/etc/vpkg/repos.d/kaputt.conf"
+abgelehnt 'ungueltiger Name' vm update
+printf 'name = "zwei"\n' > "$mr/etc/vpkg/repos.d/kaputt.conf"
+abgelehnt "'mirrors' muss eine nicht leere Liste" vm update
+printf 'name = "veyra"\nmirrors = ["%s/gut"]\n' "$u" > "$mr/etc/vpkg/repos.d/kaputt.conf"
+abgelehnt 'doppelt eingerichtet' vm update
+rm "$mr/etc/vpkg/repos.d/kaputt.conf"
+kill "$https_pid" 2>/dev/null; wait "$https_pid" 2>/dev/null || true
+trap 'rm -rf "$t"' EXIT
+unset SSL_CERT_FILE
+ok "clean (mit und ohne --alles), fehlerhafte Quellen-Dateien klar abgelehnt"
 
 # Die eigenen Pakete (wie im CI-Job "image" gebaut) muessen die Manifestpruefung bestehen;
 # vpkg selbst bringt z. B. die leeren Verzeichnisse der Paketdatenbank mit.

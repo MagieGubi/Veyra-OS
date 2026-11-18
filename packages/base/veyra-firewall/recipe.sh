@@ -6,12 +6,13 @@
 # Status: systemctl status veyra-firewall; Regeln ansehen: nft list ruleset
 pkgname=veyra-firewall
 pkgver=0.1
-pkgrel=1
+pkgrel=2
 pkgdesc="Firewall (nftables): eingehend standardmaessig gesperrt"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(nftables.conf)
 sha256sums=(b8c7624566bf673cc763dffaba45d7c13a5124da1b5d8bebde17f5250ce7e143)
+groups=(veyra-security)
 depends=(nftables systemd)
 
 package() {

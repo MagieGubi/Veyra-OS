@@ -4,10 +4,11 @@
 # Der Selbsttest prueft die Werte im laufenden System.
 pkgname=veyra-sicherheit
 pkgver=0.2
-pkgrel=1
+pkgrel=2
 pkgdesc="Sicherheits-Grundeinstellungen (sysctl)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
+groups=(veyra-security)
 depends=(systemd procps-ng)
 
 package() {

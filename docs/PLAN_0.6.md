@@ -64,7 +64,9 @@ abgebrochene Downloads werden als `.teil` verworfen; Paketgruppen über ein Feld
 im Manifest und Metapakete (leere Pakete mit Abhängigkeiten) `veyra-base`,
 `veyra-network`, `veyra-security`, `veyra-development`, `veyra-recovery`. Bestehende Befehle
 und das Paketformat bleiben kompatibel; ein neues Manifest-Feld bekommt eine
-Formatversion. Test: Erweiterung von `tests/vpkg/vpkg-test.sh` mit lokalem
+Formatversion. *Umgesetzt (18.11.):* `groups` ist optional und wird von VPKG bis 0.5 einfach
+nicht gelesen; eine neue Formatversion hätte ältere VPKG jedes Paket ablehnen lassen. Das
+Format bleibt deshalb `format = 1` (docs/vpkg-format.md, „Gruppen“). Test: Erweiterung von `tests/vpkg/vpkg-test.sh` mit lokalem
 https-Server, zwei Spiegeln (einer kaputt), abgebrochenem Download.
 
 ### Phase 4: Boot und Recovery
