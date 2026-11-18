@@ -20,7 +20,8 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | VPKG 0.6: Quellen mit Spiegeln, Paket-Cache, Gruppen und Metapakete, update/search/clean/repo list | ✅ | 38 VPKG-Tests (zwei Spiegel mit kaputtem und veraltetem, abgebrochener Download, kaputter Cache); Selbsttest „Paketgruppen: ok“ im Lauf [44281705958](https://github.com/MagieGubi/Veyra-OS/actions/runs/44281705958); noch kein öffentliches Repository |
 | Wurzelzertifikate (veyra-zertifikate, Mozilla-Bündel aus certifi) | ✅ | Selbsttest „TLS“ im Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): github.com per TLS 1.3 geprüft |
 | Paket-Repository | 🔧 | wird pro Lauf als CI-Artefakt gebaut und signiert (7 Tage); kein dauerhaftes Online-Repository |
-| Boot (UEFI, Kernel direkt als `BOOTX64.EFI`) | ✅ | Login nach etwa 7 s in QEMU |
+| Boot (UEFI, systemd-boot mit Boot-Zähler, Einträge per `PARTUUID`) | ✅ | QEMU: Eintrag nach gutem Start bestätigt; Direktstart aus 0.5 bleibt als `--bootweg direkt` wählbar |
+| Kernel-Update mit Rückfall (`veyra-kernel-update`) | ✅ | QEMU: kaputter Kernel scheitert dreimal, danach startet der alte; `liste` meldet ihn als schlecht ([Lauf](https://github.com/MagieGubi/Veyra-OS/actions/runs/44410970865)) |
 | Live-ISO (eigenes Init, SquashFS, Overlay) | ✅ | Boot von virtueller CD, Selbsttest OK |
 | Entwicklungs- und Testabbild getrennt, root gesperrt bis zur Ersteinrichtung | ✅ | 17 Konten- und 4 Abbild-Tests; Ersteinrichtung an Konsole 1 per Tastatur in QEMU eingetippt (`image/install-test.py`, Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590)) |
 | Benutzerverwaltung | 🔧 | shadow ohne PAM; Ersteinrichtung legt einen Benutzer in `wheel` an; `sudo` fehlt |
@@ -31,7 +32,7 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | Hardware (NVMe, USB, Intel-Grafik, Tastatur) | 🔧 | Treiber im Kernel, nie auf echter Hardware geprüft |
 | Firmware | ⬜ | `regulatory.db` fehlt laut Kernel-Log |
 | Installer 0.3 (`veyra-install`, Kommandozeile, ganzer Datenträger, GPT mit ESP und ext4, Konten bei der Installation, alte Partitionstabelle bei Fehler zurück) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): Installation auf leere 8-GiB-Platte; erster Start mit Ersteinrichtung, Anmeldung als neuer Benutzer, `su`, Neustart, Anmeldung als root; 20 Installer-Tests; nie auf echter Hardware |
-| Mehrere Veyra-Platten | 🔧 | Startprüfung warnt (Bootweg A); welche Platte startet, ist dann nicht festgelegt (Bootloader in 0.6) |
+| Mehrere Veyra-Platten | ✅ | Neue Installationen starten über `PARTUUID` die eigene Partition; nur beim Direktstart warnt die Startprüfung weiterhin |
 | Updates und Rollback des Systems | ⬜ | nur Paket-Transaktionen mit Rücknahme |
 | Recovery | 🔧 | Live-ISO startet; kein dokumentierter Rettungsablauf |
 | Grafische Oberfläche | ⬜ | – |

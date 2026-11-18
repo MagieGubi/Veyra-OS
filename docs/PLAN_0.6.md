@@ -77,6 +77,9 @@ https-Server, zwei Spiegeln (einer kaputt), abgebrochenem Download.
 2. **Kernel-Update:** `veyra-kernel-update` legt den neuen Kernel neben den alten, prüft
    die EFI-Datei, schreibt den Eintrag, markiert ihn als „zu testen“; erst ein
    erfolgreicher Start macht ihn zum Standard.
+   *Umgesetzt (18.11.):* Schritte 1 und 2 sind im CI grün (Lauf 44410970865): Installation
+   mit systemd-boot, Bestätigung nach gutem Start, kaputter Kernel fällt nach drei
+   Fehlstarts auf den alten zurück. Nur in QEMU geprüft.
 3. **Recovery:** `veyra-recovery` in der Live-ISO: installierte Systeme finden, `fsck`,
    `vpkg check` und `recover` im Zielsystem, Booteinträge reparieren, Kernel-Rückfall,
    Logs zeigen, Kontenprüfung. Test in QEMU: absichtlich kaputter Booteintrag und
