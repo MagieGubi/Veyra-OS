@@ -4,6 +4,8 @@
 # die Signatur, und der SHA-256 wird in stage4/sources.lock festgeschrieben.
 # libmnl 1.0.5 (2022) ist noch mit dem 2024 ersetzten Schluessel 0xD55D978A8A1420E4 signiert;
 # dafuer zaehlt die vom Projekt veroeffentlichte Widerrufsurkunde als Beleg (widerruf:URL).
+# Gepruefte Signierer (CI-Lauf 44263921331): libmnl 37D964ACC04981C75500FB9BD55D978A8A1420E4,
+# libnftnl und nftables 8C5F7146A1757A65E2422A94D70D1A666ACF2B21.
 https://www.netfilter.org/pub/libmnl/libmnl-1.0.5.tar.bz2 https://www.netfilter.org/pub/libmnl/libmnl-1.0.5.tar.bz2.sig widerruf:https://www.netfilter.org/files/coreteam-revoke-0xD55D978A8A1420E4.txt
 https://www.netfilter.org/pub/libnftnl/libnftnl-1.2.9.tar.xz https://www.netfilter.org/pub/libnftnl/libnftnl-1.2.9.tar.xz.sig https://www.netfilter.org/files/coreteam-gpg-key-0xD70D1A666ACF2B21.txt
 https://www.netfilter.org/pub/nftables/nftables-1.1.3.tar.xz https://www.netfilter.org/pub/nftables/nftables-1.1.3.tar.xz.sig https://www.netfilter.org/files/coreteam-gpg-key-0xD70D1A666ACF2B21.txt

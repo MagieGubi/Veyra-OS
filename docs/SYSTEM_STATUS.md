@@ -25,7 +25,9 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | Entwicklungs- und Testabbild getrennt, root gesperrt bis zur Ersteinrichtung | ✅ | 17 Konten- und 4 Abbild-Tests; Ersteinrichtung an Konsole 1 per Tastatur in QEMU eingetippt (`image/install-test.py`, Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590)) |
 | Benutzerverwaltung | 🔧 | shadow ohne PAM; Ersteinrichtung legt einen Benutzer in `wheel` an; `sudo` fehlt |
 | Netzwerk per Kabel (DHCP, DNS), keine offenen Ports | ✅ | Selbsttest in QEMU (e1000e) |
-| WLAN, Bluetooth, Audio, Firewall, Zeitsynchronisierung, Drucker | ⬜ | – |
+| Firewall (nftables, eingehend und Weiterleiten verworfen) | ✅ | Selbsttest „Firewall: ok“ im Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331); [security.md](security.md) |
+| Kernel-Härtung (Kernel-Optionen, 19 sysctl-Werte, Yama) | ✅ | Selbsttest „Kernel-Härtung: ok“ im Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331) |
+| WLAN, Bluetooth, Audio, Zeitsynchronisierung, Drucker | ⬜ | – |
 | Hardware (NVMe, USB, Intel-Grafik, Tastatur) | 🔧 | Treiber im Kernel, nie auf echter Hardware geprüft |
 | Firmware | ⬜ | `regulatory.db` fehlt laut Kernel-Log |
 | Installer 0.3 (`veyra-install`, Kommandozeile, ganzer Datenträger, GPT mit ESP und ext4, Konten bei der Installation, alte Partitionstabelle bei Fehler zurück) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): Installation auf leere 8-GiB-Platte; erster Start mit Ersteinrichtung, Anmeldung als neuer Benutzer, `su`, Neustart, Anmeldung als root; 20 Installer-Tests; nie auf echter Hardware |

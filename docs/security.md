@@ -25,20 +25,23 @@ Links, FIFOs und Dateien in fremden Verzeichnissen, keine ICMP-Umleitungen, kein
 Source-Routing, SYN-Cookies.
 
 Nachweis: Der Selbsttest liest jeden Wert der Datei im laufenden System zurück, prüft, dass
-Yama aktiv ist und nftables im Kernel steckt („Kernel-Härtung: ok“).
+Yama aktiv ist und nftables im Kernel steckt („Kernel-Härtung: ok“, 19 Werte, im Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331)).
+Aktive LSM laut Kernel: capability, yama, selinux (SELinux aus der Grundkonfiguration, ohne
+Regelwerk, also ohne Wirkung).
 
 ## Firewall (0.6)
 
 Pakete `libmnl`, `libnftnl`, `nftables` (Stufe 4b, Teil 4; Quellen per Signatur des
 netfilter-Projekts geprüft, der Schlüssel muss von netfilter.org und vom Schlüsselserver
-übereinstimmen) und `veyra-firewall`. Der Dienst `veyra-firewall.service` lädt
+übereinstimmen; libmnl 1.0.5 ist noch mit dem 2024 ersetzten Schlüssel signiert, dort belegt
+die Widerrufsurkunde von netfilter.org den Schlüssel; SHA-256 danach in `stage4/sources.lock`) und `veyra-firewall`. Der Dienst `veyra-firewall.service` lädt
 `/etc/nftables.conf` vor dem Netz: eingehend verwerfen außer Loopback, Antworten auf eigene
 Verbindungen, nötiges ICMP und ICMPv6 (Nachbarn, Router, Fehlermeldungen), begrenztes Ping
 und DHCP-Antworten; Weiterleiten verwerfen; ausgehend frei. Kein Port ist offen.
 
 Nachweis: `tests/firewall/firewall-test.sh` (`nft -c`, Grundsätze), Selbsttest
 „Firewall: ok“ und weiterhin „Netzwerk: ok“ (DHCP, DNS) und „Offene Ports: ok“ im
-gebooteten Abbild.
+gebooteten Abbild und im installierten System (Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331)). Ein Portscan von außen fehlt noch.
 
 ## Bewusst noch nicht
 
