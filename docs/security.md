@@ -15,8 +15,8 @@ nicht auf (getty-Dienste: SIGHUP, höchstens 5 s).
 Fragment `kernel/config/veyra-50-security.config`: Stack-Schutz, `FORTIFY_SOURCE`,
 geprüfte Kopien zwischen Kernel und Programmen, genullter neuer Speicher, KASLR,
 schreibgeschützter Kernel-Code, gehärtete Slab-Freilisten, Listenprüfung, `/dev/mem` nur
-für Gerätespeicher, kein `TIOCSTI`, Yama und Lockdown (Lockdown-Modus „none“ bis Secure
-Boot). `build-kernel.sh` bricht ab, wenn Kconfig eine Option verwirft.
+für Gerätespeicher, kein `TIOCSTI`, Yama. Lockdown fehlt, weil es Modulsignaturen erzwingt
+(siehe unten). `build-kernel.sh` bricht ab, wenn Kconfig eine Option verwirft.
 
 Paket `veyra-sicherheit`, Datei `/usr/lib/sysctl.d/50-veyra-sicherheit.conf`: Kernel-Adressen
 und Kernel-Log nur für root, `ptrace` nur auf eigene Kindprozesse, BPF nur für root mit
@@ -29,6 +29,6 @@ Yama aktiv ist und nftables im Kernel steckt („Kernel-Härtung: ok“).
 
 ## Bewusst noch nicht
 
-- Modulsignaturen: würden den bit-identischen Kernel-Build brechen (Entscheidung in
+- Modulsignaturen und Lockdown (Lockdown erzwingt Modulsignaturen): würden den bit-identischen Kernel-Build brechen (Entscheidung in
   PLAN_0.6.md).
 - Firewall-Regeln: der Kernel kann nftables, das Programm `nft` und die Regeln folgen.
