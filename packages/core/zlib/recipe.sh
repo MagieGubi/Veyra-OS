@@ -3,7 +3,9 @@ pkgver=1.3.1
 pkgdesc="Kompressionsbibliothek"
 license=Zlib
 url=https://zlib.net
-sources=(https://zlib.net/fossils/zlib-1.3.1.tar.gz)
+sources=(https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz)
+# zlib.net/fossils lieferte am 18.11.2026 eine andere Datei aus (SHA-256 passte nicht);
+# das Release auf GitHub ist bytegleich mit dem gepinnten Archiv.
 sha256sums=()
 depends=(glibc)
 
