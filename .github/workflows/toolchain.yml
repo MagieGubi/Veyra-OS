@@ -45,8 +45,17 @@ jobs:
       - name: Rezepte und Quellenlisten pruefen
         run: |
           for r in packages/*/*/recipe.sh; do bash -n "$r"; done
-          for o in stage4/order-*.list; do
+          # Teile 1 bis 3: LFS-Pakete (GNU-Signatur oder LFS-MD5). Teil 4 (ausserhalb LFS):
+          # jede Quelle muss in stage4/sources-4.list mit Signatur und Schluessel stehen.
+          for o in stage4/order-[123].list; do
             build/scripts/gen-sources-list.sh "$o" packages/core stage4/lfs-12.4-md5sums > /dev/null
+          done
+          grep -vE '^\s*(#|$)' stage4/order-4.list | while read -r name; do
+            ( sources=(); . "packages/core/$name/recipe.sh"
+              for u in "${sources[@]}"; do
+                awk -v u="$u" '$1 == u && NF == 3 {f=1} END {exit !f}' stage4/sources-4.list \
+                  || { echo "Keine Pruefung fuer $u in stage4/sources-4.list" >&2; exit 1; }
+              done )
           done
           build/scripts/check-pinned.sh
 
