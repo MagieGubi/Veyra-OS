@@ -1,5 +1,6 @@
-# Holt Referenzdaten fuer neue Quellen (Versionen und MD5 aus Linux From Scratch 12.4).
-# Laeuft nur, wenn sich diese Datei aendert, oder per Knopfdruck.
+# Holt Referenzdaten fuer neue Quellen (Versionen, Pruefsummen, Signierer), die aus der
+# Entwicklungsumgebung nicht erreichbar sind. Laeuft nur, wenn sich diese Datei aendert,
+# oder per Knopfdruck. Aendert nichts im Repository.
 name: Quellen-Erkundung
 
 on:
@@ -9,12 +10,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  lfs:
+  wlan:
     runs-on: ubuntu-latest
     steps:
-      - name: LFS 12.4 (systemd) Paketliste und MD5
+      - name: iwd, ell, wireless-regdb auf kernel.org (neueste Versionen, SHA-256, Signierer)
         run: |
-          for f in wget-list-systemd md5sums; do
-            echo "--- $f ---"
-            curl -fsSL --retry 3 "https://www.linuxfromscratch.org/lfs/view/12.4-systemd/$f"
+          set -u
+          for d in network/wireless/iwd:iwd libs/ell:ell software/network/wireless-regdb:wireless-regdb; do
+            pfad=${d%%:*} name=${d##*:}
+            url=https://cdn.kernel.org/pub/linux/$pfad/
+            echo "=== $name ($url)"
+            liste=$(curl -fsSL --retry 3 "$url") || { echo "nicht ladbar"; continue; }
+            neu=$(echo "$liste" | grep -o "$name-[0-9][0-9.]*\.tar\.xz\"" | tr -d '"' | sort -V | tail -3)
+            echo "neueste: $(echo $neu)"
+            f=$(echo "$neu" | tail -1)
+            curl -fsSL --retry 3 -o "$f" "$url$f"
+            curl -fsSL --retry 3 -o "${f%.xz}.sign" "$url${f%.xz}.sign" || echo "keine .sign"
+            sha256sum "$f"
+            ls -l "$f"
+            gpg --list-packets "${f%.xz}.sign" 2>/dev/null | grep -iE "issuer|keyid|created" | head -5
+          done
+      - name: Schluessel aus kernel.org pgpkeys
+        run: |
+          for k in 06CA9F5D1DCF2659 29F7239293EF1A2C AA1BA0AC1D9C3C8E 37F5D6F48CF95DB5; do
+            echo "=== $k"
+            curl -fsSL "https://git.kernel.org/pub/scm/docs/kernel/pgpkeys.git/plain/keys/$k.asc" -o k.asc \
+              && gpg --with-colons --import-options show-only --import k.asc 2>/dev/null | grep -E '^(fpr|uid)' | head -4 \
+              || echo "nicht vorhanden"
           done
