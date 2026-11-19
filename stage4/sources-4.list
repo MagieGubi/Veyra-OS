@@ -17,10 +17,14 @@ https://github.com/systemd/systemd/archive/v257.8/systemd-257.8.tar.gz - -
 https://files.pythonhosted.org/packages/a3/11/767522582afab1b884d277de0e6e011640cb9d7292a38694b4b1a1df1ae8/pyelftools-0.33.tar.gz - -
 # WLAN (Veyra 0.6, Phase 5). kernel.org signiert das entpackte Archiv (.tar.sign).
 # ell und iwd signiert Marcel Holtmann (E932D120BC2AEC444E558F0106CA9F5D1DCF2659),
-# wireless-regdb Chen-Yu Tsai (DA73759BF8619E484E5A3B47389A54219C0F2430); so in der
-# Quellen-Erkundung (Lauf 44421362184) gesehen. Die Schluesselsammlung von kernel.org
-# (git.kernel.org) ist aus GitHub Actions nicht erreichbar; erste Quelle ist deshalb
-# keys.openpgp.org (prueft die E-Mail-Adresse), zweite wie immer keyserver.ubuntu.com.
-https://cdn.kernel.org/pub/linux/libs/ell/ell-0.83.tar.xz https://cdn.kernel.org/pub/linux/libs/ell/ell-0.83.tar.sign https://keys.openpgp.org/vks/v1/by-fingerprint/E932D120BC2AEC444E558F0106CA9F5D1DCF2659
-https://cdn.kernel.org/pub/linux/network/wireless/iwd-3.12.tar.xz https://cdn.kernel.org/pub/linux/network/wireless/iwd-3.12.tar.sign https://keys.openpgp.org/vks/v1/by-fingerprint/E932D120BC2AEC444E558F0106CA9F5D1DCF2659
-https://cdn.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-2026.09.03.tar.xz https://cdn.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-2026.09.03.tar.sign https://keys.openpgp.org/vks/v1/by-fingerprint/DA73759BF8619E484E5A3B47389A54219C0F2430
+# wireless-regdb Chen-Yu Tsai (Unterschluessel DA73759BF8619E484E5A3B47389A54219C0F2430);
+# so in der Quellen-Erkundung (Lauf 44421362184) gesehen. Die Schluesselsammlung von
+# kernel.org (git.kernel.org) ist aus GitHub Actions nicht erreichbar; erste Quelle ist
+# deshalb der Schluessel, den Debian fuer dasselbe Paket festhaelt (debian/upstream/
+# signing-key.asc, fuer iwd und ell derselbe Signierer; Lauf 44426798143 zeigt, dass er
+# mit dem Spiegel der kernel.org-Sammlung uebereinstimmt), zweite wie immer
+# keyserver.ubuntu.com. keys.openpgp.org liefert Marcels Schluessel ohne Namen, den gpg
+# dann nicht einliest.
+https://cdn.kernel.org/pub/linux/libs/ell/ell-0.83.tar.xz https://cdn.kernel.org/pub/linux/libs/ell/ell-0.83.tar.sign https://salsa.debian.org/debian/iwd/-/raw/debian/latest/debian/upstream/signing-key.asc
+https://cdn.kernel.org/pub/linux/network/wireless/iwd-3.12.tar.xz https://cdn.kernel.org/pub/linux/network/wireless/iwd-3.12.tar.sign https://salsa.debian.org/debian/iwd/-/raw/debian/latest/debian/upstream/signing-key.asc
+https://cdn.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-2026.09.03.tar.xz https://cdn.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-2026.09.03.tar.sign https://salsa.debian.org/kernel-team/wireless-regdb/-/raw/debian/latest/debian/upstream/signing-key.asc
