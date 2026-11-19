@@ -28,12 +28,14 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | Netzwerk per Kabel (DHCP, DNS), keine offenen Ports | ✅ | Selbsttest in QEMU (e1000e) |
 | Firewall (nftables, eingehend und Weiterleiten verworfen) | ✅ | Selbsttest „Firewall: ok“ im Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331); [security.md](security.md) |
 | Kernel-Härtung (Kernel-Optionen, 19 sysctl-Werte, Yama) | ✅ | Selbsttest „Kernel-Härtung: ok“ im Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331) |
-| WLAN, Bluetooth, Audio, Zeitsynchronisierung, Drucker | ⬜ | – |
-| Hardware (NVMe, USB, Intel-Grafik, Tastatur) | 🔧 | Treiber im Kernel, nie auf echter Hardware geprüft |
+| WLAN-Software (iwd 3.12, wireless-regdb, `veyra-network`) | 🔧 | QEMU: iwd läuft und erkennt ein virtuelles Funkgerät (mac80211_hwsim), regulatory.db lädt ([Lauf](https://github.com/MagieGubi/Veyra-OS/actions/runs/44426903469)); echtes WLAN nie geprüft |
+| WLAN-Firmware (`veyra-firmware-intel-wlan`, AX201/AX210/AX211) | 🔧 | im Repository und im Testabbild; nie auf echter Hardware geladen |
+| Bluetooth, Audio, Drucker | ⬜ | – |
+| Hardware (NVMe, USB, Intel-Grafik, Tastatur) | 🔧 | Treiber im Kernel, nie auf echter Hardware geprüft; `veyra-hwinfo` zeigt Geräte ohne Treiber |
 | Firmware | ⬜ | `regulatory.db` fehlt laut Kernel-Log |
 | Installer 0.3 (`veyra-install`, Kommandozeile, ganzer Datenträger, GPT mit ESP und ext4, Konten bei der Installation, alte Partitionstabelle bei Fehler zurück) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): Installation auf leere 8-GiB-Platte; erster Start mit Ersteinrichtung, Anmeldung als neuer Benutzer, `su`, Neustart, Anmeldung als root; 20 Installer-Tests; nie auf echter Hardware |
 | Mehrere Veyra-Platten | ✅ | Neue Installationen starten über `PARTUUID` die eigene Partition; nur beim Direktstart warnt die Startprüfung weiterhin |
 | Updates und Rollback des Systems | ⬜ | nur Paket-Transaktionen mit Rücknahme |
-| Recovery | 🔧 | Live-ISO startet; kein dokumentierter Rettungsablauf |
+| Recovery (`veyra-recovery` in der Live-ISO, docs/recovery.md) | ✅ | QEMU: Booteintrag und Paketdatei beschädigt, Platte startet nicht, Reparatur von der Live-ISO, startet wieder ([Lauf](https://github.com/MagieGubi/Veyra-OS/actions/runs/44426903469)); nie auf echter Hardware |
 | Grafische Oberfläche | ⬜ | – |
 | CI-Prüfungen | ✅ | shellcheck, VPKG-, Diagnose-, Konten- und Abbild-Tests, Kernel-Reproduzierbarkeit, Boot-Tests von Platte und CD mit Selbsttest und sauberem Herunterfahren |

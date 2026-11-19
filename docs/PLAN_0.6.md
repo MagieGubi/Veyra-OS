@@ -84,6 +84,7 @@ https-Server, zwei Spiegeln (einer kaputt), abgebrochenem Download.
    `vpkg check` und `recover` im Zielsystem, Booteinträge reparieren, Kernel-Rückfall,
    Logs zeigen, Kontenprüfung. Test in QEMU: absichtlich kaputter Booteintrag und
    kaputtes Paket, Recovery repariert, Platte startet wieder.
+   *Umgesetzt (19.11.):* grün in Lauf 44426903469, Ablauf in docs/recovery.md.
 
 ### Phase 5: Hardware und Netzwerk
 Firmware aus einem gepinnten linux-firmware-Archiv, aufgeteilt nach Gerätegruppen
@@ -93,6 +94,10 @@ Lizenz. iwd für WPA2/WPA3, `wireless-regdb`, systemd-timesyncd. Werkzeuge
 `veyra-network` (Geräte, WLAN-Netze, verbinden, Status, DNS-Test, Diagnose ohne
 Passwörter). Test in QEMU: hwinfo-Ausgabe gegen die bekannte VM-Hardware, iwd startet
 ohne Gerät sauber. **WLAN selbst geht nur auf echter Hardware zu prüfen.**
+*Stand 19.11. (Lauf 44426903469):* veyra-hwinfo, veyra-network, Firmware-Paket für Intel-WLAN
+(AX201, AX210, AX211, Dateien einzeln gepinnt), ell, iwd und wireless-regdb aus Quellcode
+(GPG-geprüft), Kernel 6.18.56-veyra5 mit cfg80211/mac80211 als Module. In QEMU erkennt iwd ein
+virtuelles Funkgerät. Offen: i915-Firmware (Treiber ist fest eingebaut, lädt vor der Root-Partition).
 
 ### Phase 6: Desktop-Grundlage (experimentell)
 Grafikstack aus Quellcode in einer eigenen Stufe (nicht im Basissystem): libdrm, Wayland,
