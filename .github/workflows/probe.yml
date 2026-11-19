@@ -30,12 +30,22 @@ jobs:
             ls -l "$f"
             gpg --list-packets "${f%.xz}.sign" 2>/dev/null | grep -iE "issuer|keyid|created" | head -5
           done
-      - name: Schluessel (keys.openpgp.org, keyserver.ubuntu.com, kernel.org)
+      - name: Schluessel von Projekt- und Distributionsseiten
         run: |
-          for f in E932D120BC2AEC444E558F0106CA9F5D1DCF2659 3B6E3D185420C41C4145C3E929F7239293EF1A2C; do
-            echo "=== $f"
-            for u in "https://keys.openpgp.org/vks/v1/by-fingerprint/$f" "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x$f"; do
-              curl -fsSL -m 60 "$u" -o k.asc && echo "$u: $(gpg --with-colons --import-options show-only --import k.asc 2>/dev/null | grep -cE '^fpr') fpr" || echo "$u: nicht ladbar"
-            done
+          zeige() { gpg --with-colons --import-options show-only --import "$1" 2>/dev/null | awk -F: '$1=="fpr"||$1=="uid"{print "   "$1" "$10}' | head -4; }
+          for k in 06CA9F5D1DCF2659 389A54219C0F2430; do
+            u="https://kernel.googlesource.com/pub/scm/docs/kernel/pgpkeys/+/refs/heads/master/keys/$k.asc?format=TEXT"
+            curl -fsSL -m 60 "$u" | base64 -d > k.asc 2>/dev/null && echo "googlesource $k: $(wc -c < k.asc) Bytes" && zeige k.asc || echo "googlesource $k: nicht ladbar"
           done
-          curl -fsS -m 60 -o /dev/null -w "www.kernel.org %{http_code}\n" https://www.kernel.org/signature.html || true
+          for u in https://salsa.debian.org/debian/iwd/-/raw/debian/latest/debian/upstream/signing-key.asc \
+                   https://salsa.debian.org/debian/iwd/-/raw/master/debian/upstream/signing-key.asc \
+                   https://salsa.debian.org/debian/ell/-/raw/debian/latest/debian/upstream/signing-key.asc \
+                   https://salsa.debian.org/debian/ell/-/raw/master/debian/upstream/signing-key.asc \
+                   https://salsa.debian.org/kernel-team/wireless-regdb/-/raw/master/debian/upstream/signing-key.asc \
+                   https://salsa.debian.org/debian/wireless-regdb/-/raw/master/debian/upstream/signing-key.asc \
+                   https://salsa.debian.org/kernel-team/wireless-regdb/-/raw/debian/latest/debian/upstream/signing-key.asc; do
+            curl -fsSL -m 60 "$u" -o k.asc && echo "$u" && zeige k.asc || echo "$u: nicht ladbar"
+          done
+          for d in debian/wireless-regdb debian/iwd debian/ell kernel-team/wireless-regdb; do
+            echo "$d: $(curl -fsS -m 30 "https://salsa.debian.org/api/v4/projects/${d/\//%2F}" | python3 -c 'import json,sys;print(json.load(sys.stdin)["default_branch"])' 2>&1 | tail -1)"
+          done
