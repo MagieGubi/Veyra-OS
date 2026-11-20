@@ -14,50 +14,25 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - name: Schluessel von den Projektseiten
-        run: |
-          set +e -u
-          export GNUPGHOME=$(mktemp -d)
-          for u in https://gitlab.freedesktop.org/emersion.gpg https://gitlab.freedesktop.org/daniels.gpg \
-                   https://gitlab.freedesktop.org/svu.gpg https://gitlab.freedesktop.org/whot.gpg \
-                   https://gitlab.freedesktop.org/wl.gpg https://gitlab.freedesktop.org/dbaker.gpg \
-                   https://codeberg.org/dnkl.gpg https://emersion.fr/.well-known/openpgpkey/hu/dj3498u4hyyarh35rkjfnghbjxug6b19 \
-                   https://www.freetype.org/developer.html https://ftp.gnu.org/gnu/gnu-keyring.gpg \
-                   https://salsa.debian.org/xorg-team/lib/pixman/-/raw/debian-unstable/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/xorg-team/data/xkeyboard-config/-/raw/debian-unstable/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/xorg-team/lib/libevdev/-/raw/debian-unstable/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/xorg-team/lib/mesa/-/raw/debian-unstable/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/debian/freetype/-/raw/master/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/xorg-team/wayland/wayland-protocols/-/raw/debian-unstable/debian/upstream/signing-key.asc; do
-            f=$(mktemp); code=$(curl -sSL -m 60 -o "$f" -w '%{http_code}' "$u")
-            echo "$u -> HTTP $code, $(wc -c < "$f") Bytes"
-            gpg --with-colons --import-options show-only --import "$f" 2>/dev/null | awk -F: '$1=="fpr"{print "   fpr", $10} $1=="uid"{print "   uid", $10}' | head -8 || true
-            gpg --list-packets "$f" 2>/dev/null | grep -m3 -oE 'expires after [^)]*' || true
-          done
-          echo "--- freetype Seite"; curl -fsSL -m 60 https://freetype.org/developer.html | grep -iE 'gpg|pgp|key' | head
-      - name: Zweite Pruefsumme bei Alpine (git.alpinelinux.org) und Arch
-        run: |
-          set +e -u
-          for n in pixman libinput hwdata font-dejavu libxkbcommon fontconfig mtdev seatd; do
-            for repo in main community; do
-              a=$(curl -fsSL -m 30 "https://git.alpinelinux.org/aports/plain/$repo/$n/APKBUILD" 2>/dev/null) || continue
-              echo "Alpine $repo/$n: $(echo "$a" | grep -E '^pkgver=') $(echo "$a" | grep -A2 '^source=' | tr -s ' \n' ' ' | cut -c1-220)"
-              echo "$a" | sed -n '/^sha512sums=/,$p' | head -4
-              break
-            done
-          done
-          for n in pixman; do
-            curl -fsSL -m 30 "https://gitlab.archlinux.org/archlinux/packaging/packages/$n/-/raw/main/PKGBUILD" | grep -E '^(pkgver|source|sha512sums|sha256sums|b2sums)=' -A1
-          done
-      - name: Pruefsummen der Kandidaten
+      - name: Restliche Pruefungen
         run: |
           set +e -u
           cd "$(mktemp -d)"
-          for u in https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz \
-                   https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.32.0/libinput-1.32.0.tar.gz \
-                   https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.4/fontconfig-2.18.4.tar.xz \
-                   https://www.x.org/releases/individual/lib/pixman-0.46.4.tar.gz; do
-            f=${u##*/}; curl -fsSL -m 300 -o "$f" "$u" && echo "$f sha256 $(sha256sum "$f" | cut -c1-64) sha512 $(sha512sum "$f" | cut -c1-128)"
+          export GNUPGHOME=$PWD/g; mkdir -m 700 g
+          u=https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.1/fontconfig-2.18.1.tar.xz
+          curl -fsSL -o fc.tar.xz "$u"; echo "fontconfig-2.18.1 sha256 $(sha256sum fc.tar.xz | cut -c1-64) sha512 $(sha512sum fc.tar.xz | cut -c1-128)"
+          curl -fsSL https://www.freedesktop.org/software/libevdev/libevdev-1.14.0.tar.xz -o ev.tar.xz; echo "libevdev sha512 $(sha512sum ev.tar.xz | cut -c1-128)"
+          curl -fsSL https://git.alpinelinux.org/aports/plain/main/libevdev/APKBUILD | sed -n '/^sha512sums=/,$p' | head -3
+          curl -fsSL https://gitlab.archlinux.org/archlinux/packaging/packages/libevdev/-/raw/main/PKGBUILD | grep -E -A1 '^(source|sha512sums|sha256sums|b2sums|validpgpkeys)='
+          echo "--- libevdev Schluessel bei Debian"
+          curl -fsSL https://salsa.debian.org/xorg-team/lib/libevdev/-/raw/debian-unstable/debian/upstream/signing-key.asc -o ev.asc; head -c 300 ev.asc; echo; gpg --import ev.asc 2>&1 | head -5
+          gpg --show-keys ev.asc 2>&1 | head -12
+          echo "--- GNU-Schluesselbund und Werner Lemberg"
+          curl -fsSL https://ftp.gnu.org/gnu/gnu-keyring.gpg -o gnu.gpg; gpg --show-keys --with-colons gnu.gpg 2>/dev/null | grep -i -B1 -A1 lemberg | head
+          echo "--- dnkl-Signaturen"
+          curl -fsSL https://codeberg.org/dnkl.gpg -o dnkl.asc; gpg -q --import dnkl.asc
+          for x in foot/1.28.0/foot-1.28.0 fcft/3.3.3/fcft-3.3.3 tllist/1.1.0/tllist-1.1.0; do
+            n=${x%%/*}; curl -fsSL -o a.tgz "https://codeberg.org/dnkl/$n/releases/download/${x#*/}.tar.gz"; curl -fsSL -o a.sig "https://codeberg.org/dnkl/$n/releases/download/${x#*/}.tar.gz.sig"
+            echo "$x sha256 $(sha256sum a.tgz | cut -c1-64)"; gpg --status-fd 1 --verify a.sig a.tgz 2>/dev/null | grep -E 'VALIDSIG|ERRSIG|BADSIG'
           done
-          curl -fsSL -m 60 https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.4/fontconfig-2.18.4.tar.xz.sha256sum
-          curl -fsSL -m 60 https://www.x.org/releases/individual/lib/pixman-0.46.4.tar.xz.sha512
+          for f in B19964FBBA09664CC81027ED5BBD4992C116573F; do curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x$f" | gpg --show-keys --with-colons 2>/dev/null | grep -E '^(fpr|uid)' | head -4; done
