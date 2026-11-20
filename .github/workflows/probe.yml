@@ -12,10 +12,11 @@ on:
 jobs:
   grafik:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Schluessel von den Projektseiten
         run: |
-          set -u
+          set +e -u
           export GNUPGHOME=$(mktemp -d)
           for u in https://gitlab.freedesktop.org/emersion.gpg https://gitlab.freedesktop.org/daniels.gpg \
                    https://gitlab.freedesktop.org/svu.gpg https://gitlab.freedesktop.org/whot.gpg \
@@ -30,13 +31,13 @@ jobs:
                    https://salsa.debian.org/xorg-team/wayland/wayland-protocols/-/raw/debian-unstable/debian/upstream/signing-key.asc; do
             f=$(mktemp); code=$(curl -sSL -m 60 -o "$f" -w '%{http_code}' "$u")
             echo "$u -> HTTP $code, $(wc -c < "$f") Bytes"
-            gpg --with-colons --import-options show-only --import "$f" 2>/dev/null | awk -F: '$1=="fpr"{print "   fpr", $10} $1=="uid"{print "   uid", $10}' | head -8
-            gpg --list-packets "$f" 2>/dev/null | grep -m3 -oE 'key expires[^)]*|expires after [^)]*'
+            gpg --with-colons --import-options show-only --import "$f" 2>/dev/null | awk -F: '$1=="fpr"{print "   fpr", $10} $1=="uid"{print "   uid", $10}' | head -8 || true
+            gpg --list-packets "$f" 2>/dev/null | grep -m3 -oE 'expires after [^)]*' || true
           done
           echo "--- freetype Seite"; curl -fsSL -m 60 https://freetype.org/developer.html | grep -iE 'gpg|pgp|key' | head
       - name: Zweite Pruefsumme bei Alpine (git.alpinelinux.org) und Arch
         run: |
-          set -u
+          set +e -u
           for n in pixman libinput hwdata font-dejavu libxkbcommon fontconfig mtdev seatd; do
             for repo in main community; do
               a=$(curl -fsSL -m 30 "https://git.alpinelinux.org/aports/plain/$repo/$n/APKBUILD" 2>/dev/null) || continue
@@ -50,7 +51,7 @@ jobs:
           done
       - name: Pruefsummen der Kandidaten
         run: |
-          set -u
+          set +e -u
           cd "$(mktemp -d)"
           for u in https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz \
                    https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.32.0/libinput-1.32.0.tar.gz \
