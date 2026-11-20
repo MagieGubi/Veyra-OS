@@ -1,7 +1,7 @@
 # Veyra OS 0.6.0: Sicherheit, Boot mit Rückfall, Netzwerk, Desktop-Prototyp
 
 Stand: 20.11.2026. Alle Nachweise stammen aus QEMU mit KVM im CI, letzter voller Lauf:
-https://github.com/MagieGubi/Veyra-OS/actions/runs/44731627264 (alle 16 Jobs grün).
+https://github.com/MagieGubi/Veyra-OS/actions/runs/44810135273 (alle 16 Jobs grün, Commit 9b1f235).
 **Auf echter Hardware ist 0.6 nie gestartet worden.**
 
 ## Neu
