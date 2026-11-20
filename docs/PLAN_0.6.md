@@ -105,6 +105,11 @@ libinput, seatd, Mesa ohne LLVM (Treiber iris, softpipe für QEMU), ein schlanke
 Compositor als Prototyp. Ziel für 0.6 ist nur: In QEMU startet eine Wayland-Sitzung mit
 Terminal (kitty, wie im Projektziel) über virtio-gpu, Screenshot im CI. Das Basissystem
 startet unverändert ohne diese Pakete.
+*Stand 20.11. (Lauf 44721414747):* erreicht. Stufe 5 baut Wayland, wlroots 0.20.2, cage,
+Mesa 26.3.1 (softpipe, virgl, svga; ohne LLVM), Go 1.26 aus einer Bootstrap-Kette und kitty
+0.48.2. Der Job „Desktop in QEMU“ startet cage mit kitty über virtio-gpu und nimmt ein
+Bildschirmfoto ([desktop.md](desktop.md)). Abweichung vom Plan: iris fehlt, weil es ab Mesa 25
+LLVM und Clang (mesa_clc) braucht; verschoben auf 0.8.
 
 ### Phase 7: Integration und Release
 Voller CI-Lauf, Reproduzierbarkeitsjob für die eigenen Pakete und Stufe 4b (P1-4),

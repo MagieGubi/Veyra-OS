@@ -37,5 +37,5 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | Mehrere Veyra-Platten | ✅ | Neue Installationen starten über `PARTUUID` die eigene Partition; nur beim Direktstart warnt die Startprüfung weiterhin |
 | Updates und Rollback des Systems | ⬜ | nur Paket-Transaktionen mit Rücknahme |
 | Recovery (`veyra-recovery` in der Live-ISO, docs/recovery.md) | ✅ | QEMU: Booteintrag und Paketdatei beschädigt, Platte startet nicht, Reparatur von der Live-ISO, startet wieder ([Lauf](https://github.com/MagieGubi/Veyra-OS/actions/runs/44426903469)); nie auf echter Hardware |
-| Grafische Oberfläche | ⬜ | – |
+| Grafische Sitzung (cage mit kitty, Wayland, Mesa ohne LLVM; [desktop.md](desktop.md)) | 🔧 | QEMU mit virtio-gpu: cage und kitty laufen als normaler Benutzer, Bildschirmfoto im CI ([Lauf 44721414747](https://github.com/MagieGubi/Veyra-OS/actions/runs/44721414747)); nur Software-Darstellung, kein Intel-Treiber iris; nie auf echter Hardware |
 | CI-Prüfungen | ✅ | shellcheck, VPKG-, Diagnose-, Konten- und Abbild-Tests, Kernel-Reproduzierbarkeit, Boot-Tests von Platte und CD mit Selbsttest und sauberem Herunterfahren |
