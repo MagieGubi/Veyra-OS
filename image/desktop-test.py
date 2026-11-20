@@ -2,11 +2,11 @@
 """Desktop-Grundlage (Veyra 0.6, Phase 6) in QEMU: startet das Entwicklungsabbild mit
 virtio-gpu, Tastatur und Tablet. Auf der Platte sind zusaetzlich die Pakete der Stufe 5
 (@veyra-desktop) und veyra-desktop-test installiert; dessen Dienst startet als
-unprivilegierter Benutzer cage mit foot ueber seatd.
+unprivilegierter Benutzer cage mit kitty (OpenGL ueber Mesa softpipe) ueber seatd.
 
 Geprueft wird:
-  - seatd und veyra-desktop-test laufen, cage und foot sind Prozesse des Testbenutzers
-  - foot hat sein Skript ausgefuehrt (Markendatei im Laufzeitverzeichnis)
+  - seatd und veyra-desktop-test laufen, cage und kitty sind Prozesse des Testbenutzers
+  - kitty hat sein Skript ausgefuehrt (Markendatei im Laufzeitverzeichnis)
   - virtio-gpu ist als DRM-Geraet da und ein Ausgang ist verbunden
   - das Bild der Grafikkarte (QEMU screendump) zeigt Inhalt: mehrere Farben und ein
     nennenswerter Anteil Pixel, die sich vom Hintergrund unterscheiden
@@ -107,7 +107,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix="veyra-desktop-test.")
     vm = None
     try:
-        schritt("Start mit virtio-gpu: Desktop-Testdienst (cage mit foot)")
+        schritt("Start mit virtio-gpu: Desktop-Testdienst (cage mit kitty)")
         vm = VM(platte, os.path.join(logdir, "desktop.log"), tmp, extra=GRAFIK)
         vm.erwarte(r"veyra login:", 300)
         try:
@@ -118,13 +118,13 @@ def main():
         vm.befehl("ls /sys/class/drm/; cat /sys/class/drm/card*-*/status; echo DRM-$((1+1))",
                   r"card\d[\s\S]*connected[\s\S]*DRM-2")
         ok("virtio-gpu als DRM-Geraet mit verbundenem Ausgang")
-        vm.befehl("for i in $(seq 60); do [ -e /run/veyra-desktop-test/foot-laeuft ] && break; sleep 2; done; "
+        vm.befehl("for i in $(seq 60); do [ -e /run/veyra-desktop-test/terminal-laeuft ] && break; sleep 2; done; "
                   "systemctl is-active seatd veyra-desktop-test; ls /run/veyra-desktop-test/; echo F-$((2+2))",
-                  r"active\s*\r?\n\s*active\s*\r?\n[\s\S]*foot-laeuft[\s\S]*F-4", 180)
-        ok("seatd und veyra-desktop-test aktiv, foot hat sein Skript ausgefuehrt")
-        vm.befehl("ps -o user=,comm= -C cage,foot | sort; echo P-$((3+3))",
-                  r"desktest\s+cage\s*\r?\n\s*desktest\s+foot[\s\S]*P-6", 30)
-        ok("cage und foot laufen als Testbenutzer (ohne root)")
+                  r"active\s*\r?\n\s*active\s*\r?\n[\s\S]*terminal-laeuft[\s\S]*F-4", 180)
+        ok("seatd und veyra-desktop-test aktiv, kitty hat sein Skript ausgefuehrt")
+        vm.befehl("ps -o user=,comm= -C cage,kitty | sort -u; echo P-$((3+3))",
+                  r"desktest\s+cage\s*\r?\n\s*desktest\s+kitty[\s\S]*P-6", 30)
+        ok("cage und kitty laufen als Testbenutzer (ohne root)")
         vm.befehl("journalctl -b -u veyra-desktop-test -u seatd --no-pager | tail -25; echo J-$((4+4))",
                   r"J-8", 30)
         time.sleep(3)
@@ -153,7 +153,7 @@ def main():
         if vm:
             vm.stopp()
         shutil.rmtree(tmp, ignore_errors=True)
-    print("ERFOLG: Wayland-Sitzung (cage, foot) startet in QEMU ueber virtio-gpu")
+    print("ERFOLG: Wayland-Sitzung (cage, kitty) startet in QEMU ueber virtio-gpu")
     return 0
 
 

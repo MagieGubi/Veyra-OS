@@ -1,6 +1,7 @@
 #!/bin/bash
 # veyra-desktop: startet die Desktop-Sitzung von Veyra 0.6 (experimentell) auf dieser Konsole:
-# den Kiosk-Compositor cage mit dem Terminal foot. Argumente gehen an foot, z. B.
+# den Kiosk-Compositor cage mit dem Terminal kitty (VEYRA_TERMINAL=foot: das schlanke foot
+# ohne OpenGL). Argumente gehen an das Terminal, z. B.
 #   veyra-desktop                 Terminal mit der Anmelde-Shell
 #   veyra-desktop htop            ein Programm im Terminal
 # Voraussetzungen: seatd laeuft (wird mit dem Paket eingeschaltet), der Benutzer ist in der
@@ -26,4 +27,9 @@ if ! systemctl is-active --quiet seatd.service; then
   exit 1
 fi
 export LANG="${LANG:-C.UTF-8}"
-exec cage -s -- foot "$@"
+terminal=${VEYRA_TERMINAL:-kitty}
+case $terminal in
+  kitty|foot) ;;
+  *) echo "veyra-desktop: VEYRA_TERMINAL muss kitty oder foot sein" >&2; exit 1 ;;
+esac
+exec cage -s -- "$terminal" "$@"

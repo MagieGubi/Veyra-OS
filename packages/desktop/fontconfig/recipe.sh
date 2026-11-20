@@ -1,9 +1,9 @@
 pkgname=fontconfig
-pkgver=2.18.1
+pkgver=2.16.0
 pkgdesc="Schriftverwaltung (findet und waehlt Schriften)"
 license=MIT
 url=https://www.freedesktop.org/wiki/Software/fontconfig/
-sources=(https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.1/fontconfig-2.18.1.tar.xz)
+sources=(https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.16.0.tar.xz)
 sha256sums=()
 depends=(glibc freetype expat)
 makedepends=(meson ninja gperf python)

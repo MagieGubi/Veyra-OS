@@ -1,5 +1,5 @@
 [Unit]
-Description=Desktop-Test: cage mit foot als unprivilegierter Benutzer (nur CI)
+Description=Desktop-Test: cage mit kitty als unprivilegierter Benutzer (nur CI)
 Requires=seatd.service
 After=seatd.service systemd-sysusers.service
 
@@ -8,8 +8,10 @@ User=desktest
 Group=desktest
 SupplementaryGroups=video
 RuntimeDirectory=veyra-desktop-test
-Environment=XDG_RUNTIME_DIR=/run/veyra-desktop-test LANG=C.UTF-8
-ExecStart=/usr/bin/cage -- /usr/bin/foot /usr/lib/veyra/desktop-test/bild.sh
+Environment=XDG_RUNTIME_DIR=/run/veyra-desktop-test HOME=/run/veyra-desktop-test LANG=C.UTF-8
+# QEMU ohne 3D: OpenGL in Software (Mesa softpipe)
+Environment=LIBGL_ALWAYS_SOFTWARE=1
+ExecStart=/usr/bin/cage -- /usr/bin/kitty /usr/lib/veyra/desktop-test/bild.sh
 Restart=no
 
 [Install]

@@ -2,7 +2,7 @@
 # Geprueft von build/scripts/fetch-signed.sh wie stage4/sources-4.list. Erste Schluesselquelle
 # ist das Profil des Signierers auf dem Server des Projekts (GitLab von freedesktop.org,
 # Codeberg), zweite wie immer keyserver.ubuntu.com. Signierer laut Quellen-Erkundung
-# (Laeufe 44696267596, 44696651807 und 44696901341): Simon Ser 34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48
+# (Laeufe 44696267596, 44696651807 und 44696901341; im CI bestaetigt in Lauf 44697582243): Simon Ser 34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48
 # (libdrm, wayland, libdisplay-info, wlroots, cage), Daniel Stone
 # A66D805F7C9329B4C5D82767CCC4F07FAC641EFF (wayland-protocols), Sergey Udaltsov
 # FFB4CCD275AAA422F5F9808E0661D98FC933A145 (xkeyboard-config), Daniel Ekloef
@@ -32,7 +32,8 @@ https://codeberg.org/dnkl/foot/releases/download/1.28.0/foot-1.28.0.tar.gz https
 #   freetype 2.15.0       GPG-Signatur von Werner Lemberg E30674707856409FF1948010BE6C3AAC63AD8E3F
 #                         gueltig (Schluessel vom Schluesselserver; der GNU-Schluesselbund hat
 #                         nur seinen alten Schluessel von 2003)
-#   fontconfig 2.18.1     SHA-512 = Alpine main/fontconfig
+#   fontconfig 2.16.0     SHA-256 = Buildroot package/fontconfig (Commit b04e77b9; 2.17 und
+#                         neuer brauchen Meson >= 1.11, Veyra hat 1.8.3)
 #   dejavu-fonts 2.37     SHA-512 = Alpine main/font-dejavu
 https://www.x.org/releases/individual/lib/pixman-0.46.4.tar.xz - -
 https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz - -
@@ -42,5 +43,5 @@ https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.32.0/libinput-1.32.
 https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.3.tar.gz - -
 https://github.com/vcrhonek/hwdata/archive/refs/tags/v0.413.tar.gz - -
 https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz - -
-https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.1/fontconfig-2.18.1.tar.xz - -
+https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.16.0.tar.xz - -
 https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2 - -

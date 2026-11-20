@@ -1,0 +1,14 @@
+# Stufe 5, Teil 2: kitty mit OpenGL (Veyra 0.6, Phase 6). Rezepte in packages/desktop.
+# Gebaut in chroot auf dem Basissystem mit den Paketen aus Teil 1 (order-5.list).
+python-mako
+python-pyyaml
+mesa
+libpng
+harfbuzz
+lcms2
+xxhash
+simde
+cairo
+nerd-fonts-symbols
+go
+kitty

@@ -1,14 +1,14 @@
 # Nur fuer den Desktop-Test im CI (image/desktop-test.py): startet beim Booten als Benutzer
-# desktest cage mit foot. Nie in ein Abbild fuer Menschen.
+# desktest cage mit kitty. Nie in ein Abbild fuer Menschen.
 pkgname=veyra-desktop-test
-pkgver=0.1
+pkgver=0.2
 pkgrel=1
-pkgdesc="Desktop-Test fuer das CI: cage und foot beim Start (nicht fuer echte Systeme)"
+pkgdesc="Desktop-Test fuer das CI: cage und kitty beim Start (nicht fuer echte Systeme)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 sources=(bild.sh veyra-desktop-test.service desktest.conf)
-sha256sums=(899acc6024bde7f584022f30edbfb00465348e65aa93fbef9ff8101d707b3652 b611308e180f6bd1ead6bac0208ac4fbdbaadc3420ba6c74c3aac94566f7704e e54e42aab667aae3c2cf0013c2e073483cc09f2ee18aa7be5c23005b0a9da5c1)
-depends=(veyra-desktop veyra-hwinfo)
+sha256sums=(2f2bc1b132f5046da4395f72c4f86e3b578d10f4594116ce916a9bc8f9cc862e 4333d078ec29d1d31da533889e7994fde7fa21c561ff7b53b32566f911c37486 e54e42aab667aae3c2cf0013c2e073483cc09f2ee18aa7be5c23005b0a9da5c1)
+depends=(veyra-desktop kitty veyra-hwinfo)
 
 package() {
   install -Dm755 "$srcdir/bild.sh" "$pkgdir/usr/lib/veyra/desktop-test/bild.sh"

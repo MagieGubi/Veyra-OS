@@ -1,0 +1,35 @@
+# Quellen fuer Stufe 5, Teil 2 (kitty mit Mesa und Go): wie stage4/sources-5.list.
+# Signierer laut Quellen-Erkundung (Laeufe 44697969345, 44698119453 und 44698738548):
+#   Mesa: Dylan Baker 71C4B75620BC75708B4BDB254C95FAAB3EB073EC (Schluessel wie bei den
+#     anderen Projekten ohne eigene Schluesselseite aus Debians Paketquelle)
+#   Go: Google Linux Packages Signing Authority EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796
+#     (Unterschluessel 8461EFA0..., 0F06FF86..., 0E225917...), Schluessel von dl.google.com
+#   kitty: Kovid Goyal 3CE1780F78DD88DF45194FD706BC317B515ACE7C (Schluessel von calibre-ebook.com)
+https://archive.mesa3d.org/mesa-26.3.1.tar.xz https://archive.mesa3d.org/mesa-26.3.1.tar.xz.sig https://salsa.debian.org/xorg-team/lib/mesa/-/raw/debian-unstable/debian/upstream/signing-key.asc
+https://go.dev/dl/go1.17.13.src.tar.gz https://go.dev/dl/go1.17.13.src.tar.gz.asc https://dl.google.com/linux/linux_signing_key.pub
+https://go.dev/dl/go1.20.14.src.tar.gz https://go.dev/dl/go1.20.14.src.tar.gz.asc https://dl.google.com/linux/linux_signing_key.pub
+https://go.dev/dl/go1.22.12.src.tar.gz https://go.dev/dl/go1.22.12.src.tar.gz.asc https://dl.google.com/linux/linux_signing_key.pub
+https://go.dev/dl/go1.24.13.src.tar.gz https://go.dev/dl/go1.24.13.src.tar.gz.asc https://dl.google.com/linux/linux_signing_key.pub
+https://go.dev/dl/go1.26.11.src.tar.gz https://go.dev/dl/go1.26.11.src.tar.gz.asc https://dl.google.com/linux/linux_signing_key.pub
+https://github.com/kovidgoyal/kitty/releases/download/v0.48.2/kitty-0.48.2.tar.xz https://github.com/kovidgoyal/kitty/releases/download/v0.48.2/kitty-0.48.2.tar.xz.sig https://calibre-ebook.com/signatures/kovid.gpg
+# Ohne Signatur: SHA-256 in stage4/sources.lock, am 20.11.2026 berechnet und verglichen:
+#   mako 1.4.3, PyYAML 6.0.3   SHA-256 = Angabe von pypi.org (JSON-Schnittstelle)
+#   libpng 1.6.59              SHA-512 = Alpine main/libpng (GitHub-Archiv des Tags)
+#   harfbuzz 14.2.1            SHA-512 = Alpine main/harfbuzz
+#   lcms2 2.19.1               SHA-512 = Alpine main/lcms2
+#   xxhash 0.8.3               SHA-512 = Alpine main/xxhash (GitHub-Archiv des Tags)
+#   simde 0.8.2                SHA-512 = Alpine community/simde und Arch simde
+#   cairo 1.18.4               SHA-512 = Alpine main/cairo (GitLab-Archiv des Tags)
+#   Symbols Nerd Font 3.5.1    BLAKE2b = Arch ttf-nerd-fonts-symbols
+#   go1.4-bootstrap-20171003   SHA-256 = Buildroot package/go/go-bootstrap-stage1 (Google
+#                              signiert dieses Archiv nicht)
+https://files.pythonhosted.org/packages/source/m/mako/mako-1.4.3.tar.gz - -
+https://files.pythonhosted.org/packages/source/p/pyyaml/pyyaml-6.0.3.tar.gz - -
+https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.59.tar.gz - -
+https://github.com/harfbuzz/harfbuzz/releases/download/14.2.1/harfbuzz-14.2.1.tar.xz - -
+https://github.com/mm2/Little-CMS/releases/download/lcms2.19.1/lcms2-2.19.1.tar.gz - -
+https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz - -
+https://github.com/simd-everywhere/simde/archive/refs/tags/v0.8.2.tar.gz - -
+https://gitlab.freedesktop.org/cairo/cairo/-/archive/1.18.4/cairo-1.18.4.tar.bz2 - -
+https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.5.1/patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf - -
+https://dl.google.com/go/go1.4-bootstrap-20171003.tar.gz - -
