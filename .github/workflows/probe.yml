@@ -13,55 +13,79 @@ jobs:
   grafik:
     runs-on: ubuntu-latest
     steps:
-      - name: Releases ueber die APIs von GitLab und GitHub
+      - name: Versionen ueber APIs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -u
-          for p in wayland/wayland wayland/wayland-protocols libinput/libinput wlroots/wlroots; do
+          gh_tags() { curl -fsSL -m 60 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$1/tags?per_page=${2:-15}" | python3 -c 'import json,sys; print(" ".join(t["name"] for t in json.load(sys.stdin)))'; }
+          for p in xkbcommon/libxkbcommon kovidgoyal/kitty pnggroup/libpng Cyan4973/xxHash simd-everywhere/simde JuliaStrings/utf8proc; do echo "$p: $(gh_tags $p)"; done
+          for p in emersion/libdisplay-info fontconfig/fontconfig cairo/cairo; do
             echo "$p: $(curl -fsSL -m 60 "https://gitlab.freedesktop.org/api/v4/projects/${p/\//%2F}/releases?per_page=2" | python3 -c '
           import json,sys
           for r in json.load(sys.stdin): print(r["tag_name"], [l["url"] for l in r["assets"]["links"]][:4])')"
           done
-          for p in xkbcommon/libxkbcommon harfbuzz/harfbuzz mm2/Little-CMS kovidgoyal/kitty cage-kiosk/cage dejavu-fonts/dejavu-fonts pnggroup/libpng; do
-            echo "$p: $(curl -fsSL -m 60 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$p/releases?per_page=1" | python3 -c '
+          for p in dnkl/foot dnkl/fcft dnkl/tllist; do
+            echo "$p: $(curl -fsSL -m 60 "https://codeberg.org/api/v1/repos/$p/releases?limit=2" | python3 -c '
           import json,sys
-          for r in json.load(sys.stdin): print(r["tag_name"], [a["name"] for a in r["assets"]][:8])')"
+          for r in json.load(sys.stdin): print(r["tag_name"], [a["browser_download_url"] for a in r["assets"]][:4])')"
           done
-          echo "--- wlroots 0.19 meson_options / Abhaengigkeiten"
-          curl -fsSL -m 60 https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/0.19/meson.build | grep -nE "dependency\(" | head -30
-          curl -fsSL -m 60 https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/0.19/backend/drm/meson.build | grep -nE "hwdata|dependency" | head
-          echo "--- cage meson"
-          curl -fsSL -m 60 https://raw.githubusercontent.com/cage-kiosk/cage/master/meson.build | grep -nE "dependency\(" | head
-          echo "--- kitty build.rst"
-          curl -fsSL -m 60 https://raw.githubusercontent.com/kovidgoyal/kitty/master/docs/build.rst | sed -n '/Dependencies/,/Build and run/p' | head -60
-      - name: Verzeichnisse mit Releases (neueste Versionen, Signaturen)
+          echo "--- seatd refs"; curl -fsSL -m 60 https://git.sr.ht/~kennylevinsen/seatd/refs | grep -oE 'href="[^"]*0\.9\.[0-9][^"]*"' | sort -u | head
+          echo "--- cage 0.3.1 meson"; curl -fsSL -m 60 https://raw.githubusercontent.com/cage-kiosk/cage/v0.3.1/meson.build | grep -nE "dependency\(" | head
+          echo "--- wlroots 0.20 renderers/allocators"; curl -fsSL -m 60 https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/0.20.2/meson.options | head -20
+          curl -fsSL -m 60 https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/0.20.2/backend/drm/meson.build | head -25
+          echo "--- foot meson deps"; curl -fsSL -m 60 https://codeberg.org/dnkl/foot/raw/branch/master/meson.build | grep -nE "dependency\(" | head -20
+          echo "--- pixman Verzeichnisse"; curl -fsSL -m 60 https://www.cairographics.org/releases/ | grep -oE 'pixman-0\.46\.[0-9]+\.tar\.[a-z]+(\.[a-z0-9]+)?' | sort -u
+          curl -fsSL -m 60 https://www.x.org/releases/individual/lib/ | grep -oE 'pixman-0\.46\.[0-9]+\.tar\.[a-z]+(\.[a-z0-9]+)?' | sort -u
+          echo "--- fontconfig"; curl -fsSL -m 60 https://www.freedesktop.org/software/fontconfig/release/ | grep -oE 'fontconfig-2\.1[67]\.[0-9]+\.tar\.[a-z]+(\.[a-z0-9]+)?' | sort -u
+          echo "--- mtdev"; curl -fsSL -m 60 https://bitmath.org/code/mtdev/ | grep -oE 'mtdev-1\.1\.[0-9]\.tar\.[a-z0-9]+(\.[a-z0-9]+)?' | sort -u
+      - name: Signierer und Pruefsummen
         run: |
           set -u
-          neueste() {  # URL MUSTER
-            curl -fsSL -m 60 --retry 2 "$1" 2>/dev/null | grep -oE "$2" | sort -uV | tail -4 | tr '\n' ' '
+          mkdir -p /tmp/p && cd /tmp/p
+          export GNUPGHOME=/tmp/p/g; mkdir -m 700 g
+          pruefe() {  # NAME URL SIG|-
+            local f=${2##*/}
+            curl -fsSL -m 300 -o "$f" "$2" || { echo "$1: DOWNLOAD FEHLT $2"; return; }
+            echo "$1: $f sha256 $(sha256sum "$f" | cut -c1-64) sha512 $(sha512sum "$f" | cut -c1-24)..."
+            echo "SHA512 $1 $(sha512sum "$f" | cut -c1-128)" >> sums
+            [ "$3" = - ] && return
+            curl -fsSL -m 60 -o "$f.sig" "$3" || { echo "   Signatur fehlt: $3"; return; }
+            fp=$(gpg --list-packets "$f.sig" 2>/dev/null | grep -oE 'issuer fpr v4 [0-9A-F]+|keyid [0-9A-F]+' | head -1 | awk '{print $NF}')
+            curl -fsSL -m 60 "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x$fp" -o k.asc && gpg -q --import k.asc 2>/dev/null
+            echo "   signiert von $fp: $(gpg --with-colons --list-keys "$fp" 2>/dev/null | awk -F: '$1=="uid"{print $10}' | head -2 | tr '\n' ';') $(gpg --with-colons --list-keys "$fp" 2>/dev/null | awk -F: '$1=="fpr"{print $10}' | head -1)"
+            case "$3" in *.tar.sign) xz -dc "$f" | gpg --verify "$f.sig" - 2>&1 | grep -E "Good|BAD|No public" ;; *) gpg --verify "$f.sig" "$f" 2>&1 | grep -E "Good|BAD|No public";; esac
           }
-          zeile() { echo "$1: $(neueste "$2" "$3")"; }
-          zeile libdrm https://dri.freedesktop.org/libdrm/ 'libdrm-2\.4\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile wayland https://gitlab.freedesktop.org/wayland/wayland/-/releases 'wayland-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile wayland-protocols https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases 'wayland-protocols-1\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile pixman https://www.x.org/releases/individual/lib/ 'pixman-0\.[0-9]+\.[0-9]+\.tar\.(xz|gz)(\.sig)?'
-          zeile xkeyboard-config https://www.x.org/releases/individual/data/xkeyboard-config/ 'xkeyboard-config-2\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile libxkbcommon https://xkbcommon.org/download/ 'libxkbcommon-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile libevdev https://www.freedesktop.org/software/libevdev/ 'libevdev-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile mtdev https://bitmath.org/code/mtdev/ 'mtdev-1\.[0-9]+\.[0-9]+\.tar\.(gz|bz2)'
-          zeile libinput https://gitlab.freedesktop.org/libinput/libinput/-/releases 'libinput-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile seatd https://git.sr.ht/~kennylevinsen/seatd/refs '0\.[0-9]+\.[0-9]+\.tar\.gz(\.sig)?'
-          zeile wlroots https://gitlab.freedesktop.org/wlroots/wlroots/-/releases 'wlroots-0\.[0-9]+\.[0-9]+\.tar\.gz(\.sig)?'
-          zeile mesa https://archive.mesa3d.org/ 'mesa-2[0-9]\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile freetype https://download.savannah.gnu.org/releases/freetype/ 'freetype-2\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile fontconfig https://www.freedesktop.org/software/fontconfig/release/ 'fontconfig-2\.[0-9]+\.[0-9]+\.tar\.xz'
-          zeile harfbuzz https://github.com/harfbuzz/harfbuzz/releases 'harfbuzz-[0-9]+\.[0-9]+\.[0-9]+\.tar\.xz'
-          zeile libpng https://download.sourceforge.net/libpng/ 'libpng-1\.6\.[0-9]+\.tar\.xz'
-          zeile lcms2 https://github.com/mm2/Little-CMS/releases 'lcms2-2\.[0-9]+\.tar\.gz'
-          zeile go https://go.dev/dl/ 'go1\.2[0-9]+(\.[0-9]+)?\.src\.tar\.gz'
-          zeile kitty https://github.com/kovidgoyal/kitty/releases 'kitty-0\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
-          zeile cage https://github.com/cage-kiosk/cage/releases 'cage-0\.[0-9]+\.[0-9]+\.tar\.gz(\.sig)?'
-          zeile hwdata https://github.com/vcrhonek/hwdata/tags 'v0\.[0-9]+\.tar\.gz'
-          zeile dejavu https://github.com/dejavu-fonts/dejavu-fonts/releases 'dejavu-fonts-ttf-2\.[0-9]+\.tar\.bz2'
-          for p in Mako PyYAML; do echo "$p: $(curl -fsSL -m 30 https://pypi.org/pypi/$p/json | python3 -c 'import json,sys;print(json.load(sys.stdin)["info"]["version"])')"; done
+          G=https://gitlab.freedesktop.org/-/project
+          pruefe libdrm https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz.sig
+          pruefe wayland $G/121/uploads/5f5d2e19a230e8b8250d9a7c2f280846/wayland-1.26.0.tar.xz $G/121/uploads/8470f1b7d7225fe33ccda52e955d4e64/wayland-1.26.0.tar.xz.sig
+          pruefe wayland-protocols $G/2891/uploads/b09ec29f7a671bffbfa8896065864a04/wayland-protocols-1.50.tar.xz $G/2891/uploads/6339dbe90eebda5b3c045df1537487e7/wayland-protocols-1.50.tar.xz.sig
+          pruefe pixman https://www.x.org/releases/individual/lib/pixman-0.46.4.tar.xz https://www.x.org/releases/individual/lib/pixman-0.46.4.tar.xz.sig
+          pruefe xkeyboard-config https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz.sig
+          pruefe libevdev https://www.freedesktop.org/software/libevdev/libevdev-1.14.0.tar.xz https://www.freedesktop.org/software/libevdev/libevdev-1.14.0.tar.xz.sig
+          pruefe mtdev https://bitmath.org/code/mtdev/mtdev-1.1.7.tar.bz2 -
+          pruefe libinput https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.32.0/libinput-1.32.0.tar.bz2 -
+          pruefe wlroots $G/12103/uploads/6a56af9eafb5240d2823772aeb1e2e7d/wlroots-0.20.2.tar.gz $G/12103/uploads/1e00ff239c31f19bf43695b8edc33f02/wlroots-0.20.2.tar.gz.sig
+          pruefe cage https://github.com/cage-kiosk/cage/releases/download/v0.3.1/cage-0.3.1.tar.gz https://github.com/cage-kiosk/cage/releases/download/v0.3.1/cage-0.3.1.tar.gz.sig
+          pruefe freetype https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz.sig
+          pruefe fontconfig https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.16.0.tar.xz -
+          pruefe hwdata https://github.com/vcrhonek/hwdata/archive/refs/tags/v0.413.tar.gz -
+          pruefe dejavu https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2 -
+          pruefe seatd https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.3.tar.gz -
+          pruefe mesa https://archive.mesa3d.org/mesa-26.3.1.tar.xz https://archive.mesa3d.org/mesa-26.3.1.tar.xz.sig
+      - name: Zweite Pruefsumme bei Alpine und Arch
+        run: |
+          set -u
+          cd /tmp/p
+          for n in libdrm wayland wayland-protocols pixman xkeyboard-config libevdev mtdev libinput wlroots0.20 wlroots cage freetype fontconfig hwdata font-dejavu seatd libxkbcommon libdisplay-info foot fcft tllist mesa; do
+            for repo in main community; do
+              curl -fsSL -m 30 "https://gitlab.alpinelinux.org/alpine/aports/-/raw/master/$repo/$n/APKBUILD" -o "a-$n" 2>/dev/null || continue
+              echo "Alpine $repo/$n: $(grep -E '^pkgver=' "a-$n") $(grep -A3 '^source=' "a-$n" | tr -s ' \n' ' ' | cut -c1-200)"
+              while read -r _ name sum; do grep -q "$sum" "a-$n" && echo "   SHA512 GLEICH: $name"; done < sums
+              break
+            done
+          done
+          for n in mtdev libinput hwdata libxkbcommon libdisplay-info fontconfig seatd ttf-dejavu foot fcft tllist; do
+            curl -fsSL -m 30 "https://gitlab.archlinux.org/archlinux/packaging/packages/$n/-/raw/main/PKGBUILD" -o "r-$n" 2>/dev/null || continue
+            echo "Arch $n: $(grep -E '^pkgver=' "r-$n") $(grep -A2 -E '^source=' "r-$n" | tr -s ' \n' ' ' | cut -c1-200) $(grep -A2 -E '^(sha256sums|b2sums)=' "r-$n" | tr -s ' \n' ' ' | cut -c1-180)"
+          done
