@@ -21,6 +21,10 @@ build() {
   sed -i "s/pkg_config('gl', '--libs')/pkg_config('egl', '--libs')/" setup.py
   grep -q "else 'wayland'$" setup.py && grep -q "pkg_config('egl', '--libs')" setup.py \
     || { echo "kitty: setup.py nicht wie erwartet angepasst" >&2; return 1; }
+  # setup.py sucht die eingebaute Symbolschrift ueber fc-list; im chroot ohne fertigen
+  # Font-Cache liefert das nichts. Die Datei aus nerd-fonts-symbols direkt hinlegen.
+  install -Dm644 /usr/share/fonts/nerd-fonts/SymbolsNerdFontMono-Regular.ttf \
+    fonts/SymbolsNerdFontMono-Regular.ttf
   export GOTOOLCHAIN=local GOFLAGS=-mod=mod GOPROXY="file://$srcdir_cache/gomod-kitty-$pkgver" \
     GOSUMDB=off GOCACHE=$srcdir/gocache GOPATH=$srcdir/gopath
   python3 setup.py linux-package --prefix="$srcdir/inst" --update-check-interval=0 --ignore-compiler-warnings --verbose
