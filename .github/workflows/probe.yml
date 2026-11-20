@@ -10,42 +10,36 @@ on:
   workflow_dispatch:
 
 jobs:
-  wlan:
+  grafik:
     runs-on: ubuntu-latest
     steps:
-      - name: iwd, ell, wireless-regdb auf kernel.org (neueste Versionen, SHA-256, Signierer)
+      - name: Verzeichnisse mit Releases (neueste Versionen, Signaturen)
         run: |
           set -u
-          for d in network/wireless:iwd software/network/wireless-regdb:wireless-regdb; do
-            pfad=${d%%:*} name=${d##*:}
-            url=https://cdn.kernel.org/pub/$pfad/; case $pfad in network/*) url=https://cdn.kernel.org/pub/linux/$pfad/;; esac
-            echo "=== $name ($url)"
-            liste=$(curl -fsSL --retry 3 "$url") || { echo "nicht ladbar"; continue; }
-            neu=$(echo "$liste" | grep -o "$name-[0-9][0-9.]*\.tar\.xz\"" | tr -d '"' | sort -V | tail -3)
-            echo "neueste: $(echo $neu)"
-            f=$(echo "$neu" | tail -1)
-            curl -fsSL --retry 3 -o "$f" "$url$f"
-            curl -fsSL --retry 3 -o "${f%.xz}.sign" "$url${f%.xz}.sign" || echo "keine .sign"
-            sha256sum "$f"
-            ls -l "$f"
-            gpg --list-packets "${f%.xz}.sign" 2>/dev/null | grep -iE "issuer|keyid|created" | head -5
-          done
-      - name: Schluessel von Projekt- und Distributionsseiten
-        run: |
-          zeige() { gpg --with-colons --import-options show-only --import "$1" 2>/dev/null | awk -F: '$1=="fpr"||$1=="uid"{print "   "$1" "$10}' | head -4; }
-          for k in 06CA9F5D1DCF2659 389A54219C0F2430; do
-            u="https://kernel.googlesource.com/pub/scm/docs/kernel/pgpkeys/+/refs/heads/master/keys/$k.asc?format=TEXT"
-            curl -fsSL -m 60 "$u" | base64 -d > k.asc 2>/dev/null && echo "googlesource $k: $(wc -c < k.asc) Bytes" && zeige k.asc || echo "googlesource $k: nicht ladbar"
-          done
-          for u in https://salsa.debian.org/debian/iwd/-/raw/debian/latest/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/debian/iwd/-/raw/master/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/debian/ell/-/raw/debian/latest/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/debian/ell/-/raw/master/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/kernel-team/wireless-regdb/-/raw/master/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/debian/wireless-regdb/-/raw/master/debian/upstream/signing-key.asc \
-                   https://salsa.debian.org/kernel-team/wireless-regdb/-/raw/debian/latest/debian/upstream/signing-key.asc; do
-            curl -fsSL -m 60 "$u" -o k.asc && echo "$u" && zeige k.asc || echo "$u: nicht ladbar"
-          done
-          for d in debian/wireless-regdb debian/iwd debian/ell kernel-team/wireless-regdb; do
-            echo "$d: $(curl -fsS -m 30 "https://salsa.debian.org/api/v4/projects/${d/\//%2F}" | python3 -c 'import json,sys;print(json.load(sys.stdin)["default_branch"])' 2>&1 | tail -1)"
-          done
+          neueste() {  # URL MUSTER
+            curl -fsSL -m 60 --retry 2 "$1" 2>/dev/null | grep -oE "$2" | sort -uV | tail -4 | tr '\n' ' '
+          }
+          zeile() { echo "$1: $(neueste "$2" "$3")"; }
+          zeile libdrm https://dri.freedesktop.org/libdrm/ 'libdrm-2\.4\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile wayland https://gitlab.freedesktop.org/wayland/wayland/-/releases 'wayland-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile wayland-protocols https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases 'wayland-protocols-1\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile pixman https://www.x.org/releases/individual/lib/ 'pixman-0\.[0-9]+\.[0-9]+\.tar\.(xz|gz)(\.sig)?'
+          zeile xkeyboard-config https://www.x.org/releases/individual/data/xkeyboard-config/ 'xkeyboard-config-2\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile libxkbcommon https://xkbcommon.org/download/ 'libxkbcommon-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile libevdev https://www.freedesktop.org/software/libevdev/ 'libevdev-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile mtdev https://bitmath.org/code/mtdev/ 'mtdev-1\.[0-9]+\.[0-9]+\.tar\.(gz|bz2)'
+          zeile libinput https://gitlab.freedesktop.org/libinput/libinput/-/releases 'libinput-1\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile seatd https://git.sr.ht/~kennylevinsen/seatd/refs '0\.[0-9]+\.[0-9]+\.tar\.gz(\.sig)?'
+          zeile wlroots https://gitlab.freedesktop.org/wlroots/wlroots/-/releases 'wlroots-0\.[0-9]+\.[0-9]+\.tar\.gz(\.sig)?'
+          zeile mesa https://archive.mesa3d.org/ 'mesa-2[0-9]\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile freetype https://download.savannah.gnu.org/releases/freetype/ 'freetype-2\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile fontconfig https://www.freedesktop.org/software/fontconfig/release/ 'fontconfig-2\.[0-9]+\.[0-9]+\.tar\.xz'
+          zeile harfbuzz https://github.com/harfbuzz/harfbuzz/releases 'harfbuzz-[0-9]+\.[0-9]+\.[0-9]+\.tar\.xz'
+          zeile libpng https://download.sourceforge.net/libpng/ 'libpng-1\.6\.[0-9]+\.tar\.xz'
+          zeile lcms2 https://github.com/mm2/Little-CMS/releases 'lcms2-2\.[0-9]+\.tar\.gz'
+          zeile go https://go.dev/dl/ 'go1\.2[0-9]+(\.[0-9]+)?\.src\.tar\.gz'
+          zeile kitty https://github.com/kovidgoyal/kitty/releases 'kitty-0\.[0-9]+\.[0-9]+\.tar\.xz(\.sig)?'
+          zeile cage https://github.com/cage-kiosk/cage/releases 'cage-0\.[0-9]+\.[0-9]+\.tar\.gz(\.sig)?'
+          zeile hwdata https://github.com/vcrhonek/hwdata/tags 'v0\.[0-9]+\.tar\.gz'
+          zeile dejavu https://github.com/dejavu-fonts/dejavu-fonts/releases 'dejavu-fonts-ttf-2\.[0-9]+\.tar\.bz2'
+          for p in Mako PyYAML; do echo "$p: $(curl -fsSL -m 30 https://pypi.org/pypi/$p/json | python3 -c 'import json,sys;print(json.load(sys.stdin)["info"]["version"])')"; done
