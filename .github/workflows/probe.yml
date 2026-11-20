@@ -14,46 +14,58 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - name: kitty, Mesa und Go
+      - name: kitty-Bau, zweite Pruefsummen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e -u
           cd "$(mktemp -d)"
-          export GNUPGHOME=$PWD/g; mkdir -m 700 g
-          api() { curl -fsSL -m 60 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$1"; }
-          echo "--- kitty Releases"; api "kovidgoyal/kitty/releases?per_page=4" | python3 -c '
-          import json,sys
-          for r in json.load(sys.stdin): print(r["tag_name"], r["prerelease"], [a["name"] for a in r["assets"] if a["name"].endswith((".tar.xz",".sig",".asc"))][:6])'
-          K=$(api "kovidgoyal/kitty/releases/latest" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])'); echo "neueste: $K"
-          R=https://raw.githubusercontent.com/kovidgoyal/kitty/$K
-          echo "--- go.mod"; curl -fsSL $R/go.mod | head -5
-          echo "--- setup.py Optionen"; curl -fsSL $R/setup.py | grep -nE "add_argument\('--|slang|simde|nerd|NERD|x11|wayland|canberra|xxhash" | head -60
-          echo "--- glfw/glfw.py Module"; curl -fsSL $R/glfw/glfw.py | grep -nE "x11|wayland|xkbcommon|dbus|pkg_config" | head -30
-          echo "--- kitty Signatur"; f=kitty-${K#v}.tar.xz
-          curl -fsSL -o "$f" "https://github.com/kovidgoyal/kitty/releases/download/$K/$f" && echo "$f sha256 $(sha256sum "$f" | cut -c1-64)"
-          curl -fsSL -o "$f.sig" "https://github.com/kovidgoyal/kitty/releases/download/$K/$f.sig" && gpg --list-packets "$f.sig" | grep -m1 -E "issuer fpr|keyid"
-          curl -fsSL -o kg.asc https://calibre-ebook.com/signatures/kovid.gpg; gpg --show-keys --with-colons kg.asc 2>/dev/null | grep -E "^(fpr|uid)" | head -4
-          gpg -q --import kg.asc; gpg --status-fd 1 --verify "$f.sig" "$f" 2>/dev/null | grep -E "VALIDSIG|ERRSIG|BADSIG"
-          tar -tJf "$f" | grep -E "fonts/|go.mod$" | head
-          echo "--- Nerd Fonts"; api "ryanoasis/nerd-fonts/releases/latest" | python3 -c '
-          import json,sys; r=json.load(sys.stdin); print(r["tag_name"], [a["name"] for a in r["assets"] if "Symbols" in a["name"] or "SHA" in a["name"].upper()])'
-          echo "--- Mesa meson.options (Treiber, clc, llvm)"
-          curl -fsSL https://gitlab.freedesktop.org/mesa/mesa/-/raw/mesa-26.3.1/meson.options | grep -nE "option\('(gallium-drivers|vulkan-drivers|platforms|llvm|intel-clc|mesa-clc|precomp-compiler|glx|egl|gbm|gles1|gles2|shared-glapi|video-codecs|libunwind|valgrind|zstd|expat|intel-rt|tools)'" -A3 | head -80
-          curl -fsSL https://gitlab.freedesktop.org/mesa/mesa/-/raw/mesa-26.3.1/meson.build | grep -nE "intel_clc|mesa_clc|with_gallium_iris|needs.*clc|glslang|python.*mako|yaml" | head -30
-          echo "--- Go"
+          curl -fsSL -o k.tar.xz https://github.com/kovidgoyal/kitty/releases/download/v0.51.0/kitty-0.51.0.tar.xz && tar -xJf k.tar.xz
+          cd kitty-0.51.0
+          echo "--- vendor/ und Shader"; ls; ls vendor 2>/dev/null | head; ls kitty/shaders | head -30
+          sed -n '1430,1475p' setup.py
+          grep -nE "def (build_shaders|compile_shaders|slang)|slangc|SLANG" setup.py kitty/shaders/*.py 2>/dev/null | head -20
+          grep -nE "add_argument\(" setup.py | sed -n '1,80p' | cut -c1-150
+          grep -nE "Symbols|nerd" -i setup.py | head
+          cd ..
+          echo "--- Alpine/Arch"
+          for n in harfbuzz lcms2 xxhash simde cairo libpng kitty font-nerd-fonts-symbols py3-mako py3-yaml go mesa; do
+            for repo in main community; do
+              a=$(curl -fsSL -m 30 "https://git.alpinelinux.org/aports/plain/$repo/$n/APKBUILD" 2>/dev/null) || continue
+              echo "Alpine $repo/$n: $(echo "$a" | grep -E '^pkgver=') $(echo "$a" | grep -A3 '^source=' | tr -s ' \n' ' ' | cut -c1-260)"
+              echo "$a" | sed -n '/^sha512sums=/,$p' | head -4
+              break
+            done
+          done
+          for n in go ttf-nerd-fonts-symbols simde xxhash libpng; do
+            echo "Arch $n:"; curl -fsSL -m 30 "https://gitlab.archlinux.org/archlinux/packaging/packages/$n/-/raw/main/PKGBUILD" | grep -E -A2 '^(pkgver|source|sha256sums|sha512sums|b2sums|validpgpkeys)=' | head -14
+          done
+          echo "--- Dateien und Pruefsummen"
+          for u in https://github.com/harfbuzz/harfbuzz/releases/download/15.2.0/harfbuzz-15.2.0.tar.xz \
+                   https://github.com/mm2/Little-CMS/releases/download/lcms2.20/lcms2-2.20.tar.gz \
+                   https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz \
+                   https://github.com/simd-everywhere/simde/archive/refs/tags/v0.8.2.tar.gz \
+                   https://www.cairographics.org/releases/cairo-1.18.4.tar.xz \
+                   https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/NerdFontsSymbolsOnly.tar.xz \
+                   https://files.pythonhosted.org/packages/source/m/mako/mako-1.4.3.tar.gz \
+                   https://files.pythonhosted.org/packages/source/p/pyyaml/pyyaml-6.0.3.tar.gz \
+                   https://dl.google.com/go/go1.4-bootstrap-20171003.tar.gz; do
+            f=${u##*/}; curl -fsSL -m 300 -o "$f" "$u" && echo "$f sha256 $(sha256sum "$f" | cut -c1-64) sha512 $(sha512sum "$f" | cut -c1-128)"
+          done
+          curl -fsSL https://download.sourceforge.net/libpng/libpng-1.6.53.tar.xz -o png.tar.xz && echo "libpng-1.6.53 $(sha256sum png.tar.xz | cut -c1-64)"
+          curl -fsSL "https://sourceforge.net/projects/libpng/rss?path=/libpng16" | grep -oE 'libpng-1\.6\.[0-9]+\.tar\.xz' | sort -uV | tail -3
           curl -fsSL "https://go.dev/dl/?mode=json&include=all" | python3 -c '
           import json,sys
-          want={"go1.4-bootstrap-20171003","go1.17.13","go1.20.14","go1.22.12","go1.24.13","go1.25.9","go1.26.4","go1.27.4"}
           for r in json.load(sys.stdin):
             for f in r["files"]:
-              if f["kind"]=="source" and (r["version"] in want or r["version"].startswith(("go1.24","go1.25","go1.26","go1.27"))):
-                print(r["version"], f["filename"], f["sha256"])' | sort -uV | head -40
-          for v in 1.24.13 1.27.4; do curl -fsSL -o g.asc https://dl.google.com/go/go$v.src.tar.gz.asc && gpg --list-packets g.asc | grep -m1 -E "issuer fpr|keyid"; done
-          curl -fsSL -o b.tgz https://dl.google.com/go/go1.4-bootstrap-20171003.tar.gz && echo "go1.4-bootstrap sha256 $(sha256sum b.tgz | cut -c1-64)"
-          for v in 1.27.4 1.26.4; do curl -fsSL https://raw.githubusercontent.com/golang/go/go$v/src/cmd/dist/notgo122.go >/dev/null 2>&1; curl -fsSL "https://raw.githubusercontent.com/golang/go/go$v/src/cmd/dist/buildtool.go" | grep -nE "minBootstrap|bootstrap.*go1" | head -3; done
-          echo "--- weitere Versionen"
-          for p in harfbuzz/harfbuzz mm2/Little-CMS Cyan4973/xxHash simd-everywhere/simde pnggroup/libpng; do echo "$p: $(api "$p/releases?per_page=3" | python3 -c 'import json,sys; print([(r["tag_name"],[a["name"] for a in r["assets"]][:4]) for r in json.load(sys.stdin)])')"; done
-          curl -fsSL https://download.sourceforge.net/libpng/ 2>/dev/null | grep -oE 'libpng-1\.6\.[0-9]+\.tar\.xz(\.asc)?' | sort -uV | tail -3
-          curl -fsSL https://www.cairographics.org/releases/ | grep -oE 'cairo-1\.18\.[0-9]+\.tar\.xz(\.[a-z0-9]+)?' | sort -uV | tail -6
-          for n in mako pyyaml; do curl -fsSL https://pypi.org/pypi/$n/json | python3 -c 'import json,sys;d=json.load(sys.stdin);v=d["info"]["version"];print(v,[(u["filename"],u["digests"]["sha256"]) for u in d["releases"][v] if u["packagetype"]=="sdist"])'; done
+              if f["kind"]=="source" and r["version"].startswith(("go1.26","go1.4")): print(r["version"], f["sha256"])' | sort -uV | tail -4
+          echo "--- Go-Signaturschluessel"
+          export GNUPGHOME=$PWD/g; mkdir -m 700 g
+          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o gk.pub; gpg --show-keys --with-colons gk.pub 2>/dev/null | grep -E '^(fpr|uid)' | head -8
+          gpg -q --import gk.pub
+          for v in go1.17.13 go1.20.14 go1.22.12 go1.24.13 go1.4-bootstrap-20171003; do
+            curl -fsSL -o s.asc "https://dl.google.com/go/$v.src.tar.gz.asc" 2>/dev/null || curl -fsSL -o s.asc "https://dl.google.com/go/$v.tar.gz.asc" 2>/dev/null || { echo "$v: keine .asc"; continue; }
+            f=$v.src.tar.gz; [ -f go1.4-bootstrap-20171003.tar.gz ] && [ "$v" = go1.4-bootstrap-20171003 ] && f=go1.4-bootstrap-20171003.tar.gz
+            [ -f "$f" ] || curl -fsSL -o "$f" "https://dl.google.com/go/$f"
+            echo "$v: $(gpg --status-fd 1 --verify s.asc "$f" 2>/dev/null | grep -E 'VALIDSIG|ERRSIG|BADSIG' | cut -c1-120)"
+          done
