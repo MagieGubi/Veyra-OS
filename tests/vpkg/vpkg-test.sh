@@ -164,6 +164,20 @@ vpkg install "$P/geheim-1-1-x86_64.vpkg" >/dev/null || fail "Installation mit Mo
 [ "$(stat -c %a "$root/usr/libexec/helfer")" = 4710 ] || fail "Modus 4710 nicht uebernommen"
 ok "Dateien mit eingeschraenkten Rechten (4710) lassen sich pruefen und installieren"
 
+# Ein absoluter Symlink auf ein Verzeichnis darf beim Auspacken nicht verfolgt werden
+# (frueher setzte vpkg dabei die Rechte des Ziels im Wirtssystem auf 0700).
+mkdir -p "$t/fremdziel" && chmod 755 "$t/fremdziel"
+mkdir -p "$t/r/link"
+cat > "$t/r/link/recipe.sh" <<RCP
+pkgname=link pkgver=1 license=MIT
+package() { install -d "\$pkgdir/usr/share/X11"; ln -s "$t/fremdziel" "\$pkgdir/usr/share/X11/xkb"; }
+RCP
+"$build" --srcdir "$t" --outdir "$P" "$t/r/link" >/dev/null
+mkdir "$t/repo3" && cp "$P/link-1-1-x86_64.vpkg" "$t/repo3/"
+python3 "$here/packages/base/vpkg/vpkg" index "$t/repo3" >/dev/null || fail "index mit absolutem Verzeichnis-Link"
+[ "$(stat -c %a "$t/fremdziel")" = 755 ] || fail "vpkg hat Rechte ausserhalb des Pakets geaendert"
+ok "absolute Verzeichnis-Links im Paket werden nicht verfolgt"
+
 # ---- Transaktionen (VPKG 0.2): ein abgebrochener Vorgang hinterlaesst das System unveraendert.
 tx=$t/tx
 mkdir -p "$tx"
