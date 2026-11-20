@@ -13,6 +13,28 @@ jobs:
   grafik:
     runs-on: ubuntu-latest
     steps:
+      - name: Releases ueber die APIs von GitLab und GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          for p in wayland/wayland wayland/wayland-protocols libinput/libinput wlroots/wlroots; do
+            echo "$p: $(curl -fsSL -m 60 "https://gitlab.freedesktop.org/api/v4/projects/${p/\//%2F}/releases?per_page=2" | python3 -c '
+          import json,sys
+          for r in json.load(sys.stdin): print(r["tag_name"], [l["url"] for l in r["assets"]["links"]][:4])')"
+          done
+          for p in xkbcommon/libxkbcommon harfbuzz/harfbuzz mm2/Little-CMS kovidgoyal/kitty cage-kiosk/cage dejavu-fonts/dejavu-fonts pnggroup/libpng; do
+            echo "$p: $(curl -fsSL -m 60 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$p/releases?per_page=1" | python3 -c '
+          import json,sys
+          for r in json.load(sys.stdin): print(r["tag_name"], [a["name"] for a in r["assets"]][:8])')"
+          done
+          echo "--- wlroots 0.19 meson_options / Abhaengigkeiten"
+          curl -fsSL -m 60 https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/0.19/meson.build | grep -nE "dependency\(" | head -30
+          curl -fsSL -m 60 https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/0.19/backend/drm/meson.build | grep -nE "hwdata|dependency" | head
+          echo "--- cage meson"
+          curl -fsSL -m 60 https://raw.githubusercontent.com/cage-kiosk/cage/master/meson.build | grep -nE "dependency\(" | head
+          echo "--- kitty build.rst"
+          curl -fsSL -m 60 https://raw.githubusercontent.com/kovidgoyal/kitty/master/docs/build.rst | sed -n '/Dependencies/,/Build and run/p' | head -60
       - name: Verzeichnisse mit Releases (neueste Versionen, Signaturen)
         run: |
           set -u
