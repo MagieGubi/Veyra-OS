@@ -6,12 +6,13 @@ url=https://codeberg.org/dnkl/foot
 sources=(https://codeberg.org/dnkl/foot/releases/download/1.28.0/foot-1.28.0.tar.gz)
 sha256sums=()
 depends=(glibc wayland libxkbcommon pixman fontconfig fcft dejavu-fonts)
-makedepends=(meson ninja wayland-protocols tllist ncurses)
+makedepends=(meson ninja wayland-protocols tllist)
 
 build() {
   cd "foot-$pkgver"
+  # Die Terminfo-Eintraege foot und foot-direct liefert schon ncurses (Dateikonflikt).
   meson setup build --prefix=/usr --sysconfdir=/etc --buildtype=release -D docs=disabled \
-    -D grapheme-clustering=disabled -D tests=false -D terminfo=enabled
+    -D grapheme-clustering=disabled -D tests=false -D terminfo=disabled
   ninja -C build
 }
 
