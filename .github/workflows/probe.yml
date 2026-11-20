@@ -26,5 +26,5 @@ jobs:
           cd "$(mktemp -d)"
           gh run download 44721414747 -R "$GITHUB_REPOSITORY" -n veyra-desktop-test
           ls -la
-          sha256sum veyra-desktop.png
-          echo "BEGIN-PNG"; base64 -w 0 veyra-desktop.png; echo; echo "END-PNG"
+          ls -la desktop-logs; sha256sum desktop-logs/veyra-desktop.png
+          echo "BEGIN-PNG"; base64 -w 0 desktop-logs/veyra-desktop.png; echo; echo "END-PNG"
