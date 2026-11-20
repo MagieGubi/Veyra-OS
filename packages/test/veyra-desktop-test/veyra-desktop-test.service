@@ -11,6 +11,8 @@ RuntimeDirectory=veyra-desktop-test
 Environment=XDG_RUNTIME_DIR=/run/veyra-desktop-test HOME=/run/veyra-desktop-test LANG=C.UTF-8
 # QEMU ohne 3D: OpenGL in Software (Mesa softpipe)
 Environment=LIBGL_ALWAYS_SOFTWARE=1
+# wlroots nur mit pixman gebaut; "auto" waehlt pixman nicht, wenn es einen Render-Knoten gibt
+Environment=WLR_RENDERER=pixman
 ExecStart=/usr/bin/cage -- /usr/bin/kitty /usr/lib/veyra/desktop-test/bild.sh
 Restart=no
 

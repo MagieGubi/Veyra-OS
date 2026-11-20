@@ -3,13 +3,13 @@
 # neben diesem Rezept; bei jeder Aenderung daran muss sha256sums angepasst werden.
 pkgname=veyra-desktop
 pkgver=0.6
-pkgrel=2
+pkgrel=3
 pkgdesc="Desktop-Grundlage: Wayland-Sitzung mit cage und kitty (Metapaket, experimentell)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-desktop)
 sources=(veyra-desktop)
-sha256sums=(7958c4d9e16a4cb12d6999149f7d49802c0eab035125c0dc55f6faeb33d168a9)
+sha256sums=(199c9113da1991822b129fdd72ec23d5ef69915ab91638e412081accf5a02f2f)
 depends=(cage kitty foot seatd dejavu-fonts xkeyboard-config systemd)
 
 package() {

@@ -27,6 +27,10 @@ if ! systemctl is-active --quiet seatd.service; then
   exit 1
 fi
 export LANG="${LANG:-C.UTF-8}"
+# wlroots ist (noch) nur mit dem Software-Renderer pixman gebaut. Im Modus "auto" nimmt
+# wlroots pixman aber nur, wenn die Grafikkarte keinen Render-Knoten hat (virtio-gpu,
+# i915 und amdgpu haben einen); darum ausdruecklich waehlen. GLES2 folgt mit 0.8.
+export WLR_RENDERER="${WLR_RENDERER:-pixman}"
 terminal=${VEYRA_TERMINAL:-kitty}
 case $terminal in
   kitty|foot) ;;
