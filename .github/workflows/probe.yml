@@ -1,6 +1,6 @@
-# Holt Referenzdaten fuer neue Quellen (Versionen, Pruefsummen, Signierer), die aus der
-# Entwicklungsumgebung nicht erreichbar sind. Laeuft nur, wenn sich diese Datei aendert,
-# oder per Knopfdruck. Aendert nichts im Repository.
+# Holt Referenzdaten fuer neue Quellen (Versionen, Pruefsummen, Signierer) und Ergebnisse,
+# die aus der Entwicklungsumgebung nicht erreichbar sind. Laeuft nur, wenn sich diese Datei
+# aendert, oder per Knopfdruck. Aendert nichts im Repository.
 name: Quellen-Erkundung
 
 on:
@@ -9,18 +9,22 @@ on:
     paths: ['.github/workflows/probe.yml']
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
-  grafik:
+  bildschirmfoto:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - name: kitty 0.48.2 setup.py (Paketbau, Doku)
+      - name: Bildschirmfoto des Desktop-Tests als Text ausgeben
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set +e -u
           cd "$(mktemp -d)"
-          curl -fsSL -o k.tar.xz https://github.com/kovidgoyal/kitty/releases/download/v0.48.2/kitty-0.48.2.tar.xz && tar -xJf k.tar.xz
-          cd kitty-0.48.2
-          grep -nE "_build|man pages|Man pages|html|def package|def copy_|linux-package|build_static_kittens|def build_static|go_version|'go'|GOFLAGS|GOPROXY|mod download|-mod=" setup.py | head -60
-          sed -n '1036,1062p' setup.py
-          ls docs | head; ls docs/_build 2>/dev/null | head
-          head -12 go.mod
+          gh run download 44721414747 -R "$GITHUB_REPOSITORY" -n veyra-desktop-test
+          ls -la
+          sha256sum veyra-desktop.png
+          echo "BEGIN-PNG"; base64 -w 0 veyra-desktop.png; echo; echo "END-PNG"
