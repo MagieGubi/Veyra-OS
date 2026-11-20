@@ -1,0 +1,23 @@
+# Stufe 5: Desktop-Grundlage (Veyra 0.6, Phase 6). Rezepte in packages/desktop.
+# Gebaut in chroot auf dem fertigen Basissystem (Stufe 4b, Teil 4); die Pakete kommen nicht
+# ins Basisabbild, nur ins Repository und ins Desktop-Testabbild.
+libdrm
+wayland
+wayland-protocols
+pixman
+xkeyboard-config
+libxkbcommon
+libevdev
+mtdev
+libinput
+seatd
+hwdata
+libdisplay-info
+wlroots
+cage
+freetype
+fontconfig
+dejavu-fonts
+tllist
+fcft
+foot

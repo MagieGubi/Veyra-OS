@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-installer/veyra-rootpruefung
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -55,6 +55,14 @@ jobs:
               for u in "${sources[@]}"; do
                 awk -v u="$u" '$1 == u && NF == 3 {f=1} END {exit !f}' stage4/sources-4.list \
                   || { echo "Keine Pruefung fuer $u in stage4/sources-4.list" >&2; exit 1; }
+              done )
+          done
+          # Stufe 5 (Desktop-Grundlage, Rezepte in packages/desktop): ebenso in stage4/sources-5.list
+          grep -vE '^\s*(#|$)' stage4/order-5.list | while read -r name; do
+            ( sources=(); . "packages/desktop/$name/recipe.sh"
+              for u in "${sources[@]}"; do
+                awk -v u="$u" '$1 == u && NF == 3 {f=1} END {exit !f}' stage4/sources-5.list \
+                  || { echo "Keine Pruefung fuer $u in stage4/sources-5.list" >&2; exit 1; }
               done )
           done
           build/scripts/check-pinned.sh
@@ -526,6 +534,68 @@ jobs:
       - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
         run: cat out/packages/SHA256SUMS out/stage4-sources.lock
 
+  stage5:
+    name: Desktop-Grundlage (Stufe 5, Wayland, wlroots, cage, foot)
+    needs: stage4b-4
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache-Schluessel berechnen
+        id: key
+        run: echo "k=$(build/scripts/stage-key.sh 5)" >> "$GITHUB_OUTPUT"
+
+      - name: Fertige Stufe 5 aus dem Cache holen
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: out
+          key: stage5-${{ steps.key.outputs.k }}
+
+      - name: Basissystem holen
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: stage4b-4
+          path: in
+
+      - name: Platz auf dem Runner schaffen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Bootstrap-Container bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: docker build -t veyra-bootstrap build/container
+
+      - name: Pakete bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out
+          rm -rf in/SHA256SUMS in/packages in/stage4-sources.lock in/build-stage4b-4.log
+          docker run --rm --privileged -v "$PWD:/repo:ro" -v "$PWD/in:/in:ro" -v "$PWD/out:/out" veyra-bootstrap /repo/build/scripts/ci-stage5.sh
+
+      - name: Ergebnis hochladen
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" out || true
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: stage5-log
+          path: |
+            out/build-stage5.log
+            out/stage5-sources.lock
+          retention-days: 7
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v6
+        with:
+          name: pakete-5
+          path: out/packages
+          retention-days: 1   # nur Zwischenstand fuer den Desktop-Test
+
+      - name: Paket-Pruefsummen und gesperrte Quellen anzeigen
+        run: cat out/packages/SHA256SUMS out/stage5-sources.lock
+
   image:
     name: Abbild und Boot-Test in QEMU (Phase 5)
     needs: [stage4b-4, kernel-reproducible]
@@ -719,6 +789,92 @@ jobs:
             boot-test.log
             SHA256SUMS-test
             docs/hardware-test.md
+          retention-days: 7
+
+  desktop:
+    name: Desktop-Grundlage in QEMU (virtio-gpu, Bildschirmfoto)
+    needs: [image, stage5]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Werkzeuge installieren und KVM freigeben
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd fdisk e2fsprogs qemu-system-x86 ovmf
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Abbild holen
+        uses: actions/download-artifact@v7
+        with:
+          name: veyra-0.5
+          path: img
+      - name: Pakete der Stufe 5 holen
+        uses: actions/download-artifact@v7
+        with:
+          name: pakete-5
+          path: desktop
+
+      - name: veyra-desktop und veyra-desktop-test bauen
+        run: |
+          rm -f desktop/SHA256SUMS
+          for r in packages/base/veyra-desktop packages/test/veyra-desktop-test; do
+            build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir desktop "$r"
+          done
+
+      - name: Pakete signieren (wenn das Secret VPKG_SIGNING_KEY eingerichtet ist)
+        env:
+          VPKG_SIGNING_KEY: ${{ secrets.VPKG_SIGNING_KEY }}
+        run: |
+          if [ -z "$VPKG_SIGNING_KEY" ]; then
+            echo "::warning::Secret VPKG_SIGNING_KEY fehlt: Desktop-Pakete bleiben unsigniert."
+            exit 0
+          fi
+          umask 077
+          key=$RUNNER_TEMP/veyra-signing-key.pem
+          printf '%s\n' "$VPKG_SIGNING_KEY" > "$key"
+          build/scripts/sign-packages.sh "$key" desktop
+          rm -f "$key"
+
+      # Wie "vpkg install @veyra-desktop" auf einem fertigen System: das unveraenderte
+      # Entwicklungsabbild bekommt die Pakete der Stufe 5 dazu (VPKG prueft Signaturen und
+      # Abhaengigkeiten gegen die Paketdatenbank des Abbilds).
+      - name: Desktop-Pakete ins Abbild installieren
+        run: |
+          set -o pipefail
+          zstd -q -d --rm img/veyra-0.5.img.zst -o veyra-desktop.img
+          read -r start size < <(sfdisk -J veyra-desktop.img | python3 -c '
+          import json, sys
+          p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
+          print(p["start"] * 512, p["size"] * 512)')
+          loop=$(sudo losetup --find --show --offset "$start" --sizelimit "$size" veyra-desktop.img)
+          sudo mkdir -p /mnt/veyra
+          sudo mount "$loop" /mnt/veyra
+          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install desktop/*.vpkg | tee vpkg-install.log
+          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra list | grep -E 'cage|foot|wlroots|seatd|veyra-desktop' | tee -a vpkg-install.log
+          sudo umount /mnt/veyra
+          sudo losetup -d "$loop"
+
+      - name: Desktop-Test (cage mit foot ueber seatd, Bildschirmfoto)
+        run: python3 image/desktop-test.py veyra-desktop.img desktop-logs
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: veyra-desktop-test
+          path: |
+            desktop-logs
+            vpkg-install.log
+          retention-days: 7
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v6
+        if: success()
+        with:
+          name: veyra-desktop-pakete
+          path: desktop
           retention-days: 7
 
   live-iso:

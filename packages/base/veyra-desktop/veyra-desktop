@@ -1,0 +1,29 @@
+#!/bin/bash
+# veyra-desktop: startet die Desktop-Sitzung von Veyra 0.6 (experimentell) auf dieser Konsole:
+# den Kiosk-Compositor cage mit dem Terminal foot. Argumente gehen an foot, z. B.
+#   veyra-desktop                 Terminal mit der Anmelde-Shell
+#   veyra-desktop htop            ein Programm im Terminal
+# Voraussetzungen: seatd laeuft (wird mit dem Paket eingeschaltet), der Benutzer ist in der
+# Gruppe video. Beenden: Programm im Terminal beenden (exit).
+set -eu
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+  # Ohne PAM legt niemand /run/user/UID an: eigenes Verzeichnis, nur fuer diesen Benutzer.
+  XDG_RUNTIME_DIR=/tmp/veyra-laufzeit-$(id -u)
+  mkdir -m 0700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+  if [ -L "$XDG_RUNTIME_DIR" ] || [ ! -O "$XDG_RUNTIME_DIR" ]; then
+    echo "veyra-desktop: $XDG_RUNTIME_DIR gehoert nicht diesem Benutzer" >&2
+    exit 1
+  fi
+  chmod 0700 "$XDG_RUNTIME_DIR"
+  export XDG_RUNTIME_DIR
+fi
+if [ "$(id -u)" != 0 ] && ! id -nG | tr ' ' '\n' | grep -qx video; then
+  echo "veyra-desktop: $(id -un) ist nicht in der Gruppe video (als root: usermod -aG video $(id -un))" >&2
+  exit 1
+fi
+if ! systemctl is-active --quiet seatd.service; then
+  echo "veyra-desktop: seatd laeuft nicht (als root: systemctl enable --now seatd)" >&2
+  exit 1
+fi
+export LANG="${LANG:-C.UTF-8}"
+exec cage -s -- foot "$@"

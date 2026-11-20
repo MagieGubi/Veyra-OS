@@ -52,7 +52,7 @@ def ok(text):
 
 
 class VM:
-    def __init__(self, platte, log, tmp, cdrom=None):
+    def __init__(self, platte, log, tmp, cdrom=None, extra=()):
         # Jede VM bekommt ein eigenes, frisches Verzeichnis: eine abgebrochene VM hinterlaesst
         # ihre Sockets, und QEMU soll nie auf alte Dateien treffen.
         os.makedirs(tmp, exist_ok=True)
@@ -71,7 +71,7 @@ class VM:
             "-chardev", f"socket,id=s0,path={self.ser},server=on,wait=off,logfile={log}",
             "-serial", "chardev:s0",
             "-monitor", f"unix:{self.mon},server,nowait",
-            "-display", "none", "-no-reboot"])
+            "-display", "none", "-no-reboot", *extra])
         self.buf = ""
         self.pos = 0
         for _ in range(100):
@@ -145,6 +145,20 @@ class VM:
                 pass
         except socket.timeout:
             pass
+
+    def monitor(self, cmd, warte=2):
+        """Befehl an den QEMU-Monitor (HMP); gibt dessen Antwort zurueck."""
+        self.m.sendall(f"{cmd}\n".encode())
+        aus, ende = b"", time.time() + warte
+        while time.time() < ende:
+            try:
+                d = self.m.recv(65536)
+                if not d:
+                    break
+                aus += d
+            except socket.timeout:
+                pass
+        return aus.decode("utf-8", "replace")
 
     def anmelden(self, name, pw, versuche=1):
         for i in range(versuche):

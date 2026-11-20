@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Prueft, ob jede Quelle der Basispakete (stage4/order-*.list) in einer sources.lock steht.
+# Prueft, ob jede Quelle der Basispakete (stage4/order-*.list; Stufe 5 mit Rezepten in
+# packages/desktop) in einer sources.lock steht.
 # Neue Quellen sind erlaubt (das CI prueft sie per Signatur bzw. LFS-MD5 und zeigt den
 # SHA-256 an), werden aber als Warnung gemeldet, bis sie im Repository festgeschrieben sind.
 #
@@ -15,6 +16,7 @@ while read -r name; do
       echo "::warning::Quelle nicht festgeschrieben: $f ($name)"
       open=$((open + 1))
     fi
-  done < <(sources=(); . "packages/core/$name/recipe.sh"; for u in "${sources[@]}"; do echo "${u##*/}"; done)
+  done < <(r=packages/core/$name/recipe.sh; [ -f "$r" ] || r=packages/desktop/$name/recipe.sh
+           sources=(); . "$r"; for u in "${sources[@]}"; do echo "${u##*/}"; done)
 done < <(grep -vhE '^\s*(#|$)' stage4/order-*.list)
 echo "Nicht festgeschriebene Quellen: $open"

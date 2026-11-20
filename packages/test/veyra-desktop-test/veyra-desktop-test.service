@@ -1,0 +1,16 @@
+[Unit]
+Description=Desktop-Test: cage mit foot als unprivilegierter Benutzer (nur CI)
+Requires=seatd.service
+After=seatd.service systemd-sysusers.service
+
+[Service]
+User=desktest
+Group=desktest
+SupplementaryGroups=video
+RuntimeDirectory=veyra-desktop-test
+Environment=XDG_RUNTIME_DIR=/run/veyra-desktop-test LANG=C.UTF-8
+ExecStart=/usr/bin/cage -- /usr/bin/foot /usr/lib/veyra/desktop-test/bild.sh
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

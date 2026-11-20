@@ -1,0 +1,46 @@
+# Quellen fuer Stufe 5, Desktop-Grundlage (Veyra 0.6, Phase 6): URL  SIGNATUR-URL  SCHLUESSEL-URL
+# Geprueft von build/scripts/fetch-signed.sh wie stage4/sources-4.list. Erste Schluesselquelle
+# ist das Profil des Signierers auf dem Server des Projekts (GitLab von freedesktop.org,
+# Codeberg), zweite wie immer keyserver.ubuntu.com. Signierer laut Quellen-Erkundung
+# (Laeufe 44696267596, 44696651807 und 44696901341): Simon Ser 34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48
+# (libdrm, wayland, libdisplay-info, wlroots, cage), Daniel Stone
+# A66D805F7C9329B4C5D82767CCC4F07FAC641EFF (wayland-protocols), Sergey Udaltsov
+# FFB4CCD275AAA422F5F9808E0661D98FC933A145 (xkeyboard-config), Daniel Ekloef
+# B19964FBBA09664CC81027ED5BBD4992C116573F (tllist, fcft, foot).
+https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz.sig https://gitlab.freedesktop.org/emersion.gpg
+https://gitlab.freedesktop.org/-/project/121/uploads/5f5d2e19a230e8b8250d9a7c2f280846/wayland-1.26.0.tar.xz https://gitlab.freedesktop.org/-/project/121/uploads/8470f1b7d7225fe33ccda52e955d4e64/wayland-1.26.0.tar.xz.sig https://gitlab.freedesktop.org/emersion.gpg
+https://gitlab.freedesktop.org/-/project/2891/uploads/b09ec29f7a671bffbfa8896065864a04/wayland-protocols-1.50.tar.xz https://gitlab.freedesktop.org/-/project/2891/uploads/6339dbe90eebda5b3c045df1537487e7/wayland-protocols-1.50.tar.xz.sig https://gitlab.freedesktop.org/daniels.gpg
+https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz.sig https://gitlab.freedesktop.org/svu.gpg
+https://gitlab.freedesktop.org/-/project/14497/uploads/a7e427e2c5ef474032a87459443b7982/libdisplay-info-0.3.0.tar.xz https://gitlab.freedesktop.org/-/project/14497/uploads/294288f3ccf90fd8c1e80cfa21af7672/libdisplay-info-0.3.0.tar.xz.sig https://gitlab.freedesktop.org/emersion.gpg
+https://gitlab.freedesktop.org/-/project/12103/uploads/6a56af9eafb5240d2823772aeb1e2e7d/wlroots-0.20.2.tar.gz https://gitlab.freedesktop.org/-/project/12103/uploads/1e00ff239c31f19bf43695b8edc33f02/wlroots-0.20.2.tar.gz.sig https://gitlab.freedesktop.org/emersion.gpg
+https://github.com/cage-kiosk/cage/releases/download/v0.3.1/cage-0.3.1.tar.gz https://github.com/cage-kiosk/cage/releases/download/v0.3.1/cage-0.3.1.tar.gz.sig https://gitlab.freedesktop.org/emersion.gpg
+https://codeberg.org/dnkl/tllist/releases/download/1.1.0/tllist-1.1.0.tar.gz https://codeberg.org/dnkl/tllist/releases/download/1.1.0/tllist-1.1.0.tar.gz.sig https://codeberg.org/dnkl.gpg
+https://codeberg.org/dnkl/fcft/releases/download/3.3.3/fcft-3.3.3.tar.gz https://codeberg.org/dnkl/fcft/releases/download/3.3.3/fcft-3.3.3.tar.gz.sig https://codeberg.org/dnkl.gpg
+https://codeberg.org/dnkl/foot/releases/download/1.28.0/foot-1.28.0.tar.gz https://codeberg.org/dnkl/foot/releases/download/1.28.0/foot-1.28.0.tar.gz.sig https://codeberg.org/dnkl.gpg
+# Ohne Signatur (oder ohne nutzbaren Projektschluessel): SHA-256 in stage4/sources.lock,
+# am 20.11.2026 in der Quellen-Erkundung berechnet und gegen eine unabhaengige zweite
+# Pruefsumme verglichen (SHA-512 bei Alpine aports oder Arch, oder dortiger SHA-256):
+#   pixman 0.46.4         SHA-512 = Alpine main/pixman und Arch pixman
+#   libxkbcommon 1.13.2   SHA-512 = Alpine main/libxkbcommon (GitHub-Archiv des Tags)
+#   libevdev 1.14.0       SHA-512 = Arch libevdev; GPG-Signatur von Peter Hutterer
+#                         3C2C43D9447D5938EF4551EBE23B7E70B467F0BF gueltig (Schluessel nur vom
+#                         Schluesselserver; kein Profil mit Schluessel auf GitLab)
+#   mtdev 1.1.7           SHA-512 = Arch mtdev
+#   libinput 1.32.0       SHA-512 = Alpine community/libinput (GitLab-Archiv des Tags)
+#   seatd 0.9.3           SHA-256 = Arch seatd, SHA-512 = Alpine community/seatd
+#   hwdata 0.413          SHA-512 = Alpine main/hwdata (GitHub-Archiv des Tags)
+#   freetype 2.15.0       GPG-Signatur von Werner Lemberg E30674707856409FF1948010BE6C3AAC63AD8E3F
+#                         gueltig (Schluessel vom Schluesselserver; der GNU-Schluesselbund hat
+#                         nur seinen alten Schluessel von 2003)
+#   fontconfig 2.18.1     SHA-512 = Alpine main/fontconfig
+#   dejavu-fonts 2.37     SHA-512 = Alpine main/font-dejavu
+https://www.x.org/releases/individual/lib/pixman-0.46.4.tar.xz - -
+https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz - -
+https://www.freedesktop.org/software/libevdev/libevdev-1.14.0.tar.xz - -
+https://bitmath.org/code/mtdev/mtdev-1.1.7.tar.bz2 - -
+https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.32.0/libinput-1.32.0.tar.gz - -
+https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.3.tar.gz - -
+https://github.com/vcrhonek/hwdata/archive/refs/tags/v0.413.tar.gz - -
+https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz - -
+https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.1/fontconfig-2.18.1.tar.xz - -
+https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2 - -
