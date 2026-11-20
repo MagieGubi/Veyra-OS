@@ -728,22 +728,22 @@ jobs:
 
       - name: Abbild bauen
         run: |
-          sudo image/build-image.sh sys/veyra-stage4b-4.tar.zst k/kernel extra veyra-0.5.img basis
-          sudo chown "$(id -u):$(id -g)" veyra-0.5.img
+          sudo image/build-image.sh sys/veyra-stage4b-4.tar.zst k/kernel extra veyra-0.6.img basis
+          sudo chown "$(id -u):$(id -g)" veyra-0.6.img
 
       - name: Boot-Test (UEFI, kein Bootloader) und VPKG-Selbsttest
-        run: SELFTEST=1 image/boot-test.sh veyra-0.5.img boot.log 600
+        run: SELFTEST=1 image/boot-test.sh veyra-0.6.img boot.log 600
 
       - name: Abbild packen
         if: always()
         run: |
-          if [ -f veyra-0.5.img ]; then zstd -q -T0 -10 veyra-0.5.img -o veyra-0.5.img.zst; sha256sum veyra-0.5.img* | tee SHA256SUMS; fi
+          if [ -f veyra-0.6.img ]; then zstd -q -T0 -10 veyra-0.6.img -o veyra-0.6.img.zst; sha256sum veyra-0.6.img* | tee SHA256SUMS; fi
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: veyra-0.5
+          name: veyra-0.6
           path: |
-            veyra-0.5.img.zst
+            veyra-0.6.img.zst
             boot.log
             SHA256SUMS
           retention-days: 7
@@ -753,15 +753,15 @@ jobs:
       - name: VirtualBox-Festplatte (VDI)
         if: success()
         run: |
-          rm -f veyra-0.5.img.zst
-          qemu-img convert -f raw -O vdi veyra-0.5.img veyra-0.5.vdi
-          sha256sum veyra-0.5.vdi | tee SHA256SUMS-vdi
+          rm -f veyra-0.6.img.zst
+          qemu-img convert -f raw -O vdi veyra-0.6.img veyra-0.6.vdi
+          sha256sum veyra-0.6.vdi | tee SHA256SUMS-vdi
       - uses: actions/upload-artifact@v6
         if: success()
         with:
           name: veyra-virtualbox
           path: |
-            veyra-0.5.vdi
+            veyra-0.6.vdi
             SHA256SUMS-vdi
             docs/virtualbox.md
           retention-days: 7
@@ -773,11 +773,11 @@ jobs:
         if: success()
         run: |
           set -o pipefail
-          read -r start size < <(sfdisk -J veyra-0.5.img | python3 -c '
+          read -r start size < <(sfdisk -J veyra-0.6.img | python3 -c '
           import json, sys
           p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
           print(p["start"] * 512, p["size"] * 512)')
-          loop=$(sudo losetup --find --show --read-only --offset "$start" --sizelimit "$size" veyra-0.5.img)
+          loop=$(sudo losetup --find --show --read-only --offset "$start" --sizelimit "$size" veyra-0.6.img)
           sudo mkdir -p /mnt/quelle
           sudo mount -o ro "$loop" /mnt/quelle
           truncate -s 8G installiert.img   # sparse; das Basissystem braucht knapp 6 GiB
@@ -839,24 +839,24 @@ jobs:
       - name: Testabbild bauen (VARIANTE=test)
         if: success()
         run: |
-          rm -f veyra-0.5.img veyra-0.5.vdi
+          rm -f veyra-0.6.img veyra-0.6.vdi
           cp extra/hardware/*.vpkg* extra/
-          sudo VARIANTE=test image/build-image.sh sys/veyra-stage4b-4.tar.zst k/kernel extra veyra-0.5-test.img basis
-          sudo chown "$(id -u):$(id -g)" veyra-0.5-test.img
+          sudo VARIANTE=test image/build-image.sh sys/veyra-stage4b-4.tar.zst k/kernel extra veyra-0.6-test.img basis
+          sudo chown "$(id -u):$(id -g)" veyra-0.6-test.img
       - name: Boot-Test des Testabbilds und Selbsttest
         if: success()
-        run: SELFTEST=1 image/boot-test.sh veyra-0.5-test.img boot-test.log 600
+        run: SELFTEST=1 image/boot-test.sh veyra-0.6-test.img boot-test.log 600
       - name: Testabbild packen
         if: success()
         run: |
-          zstd -q -T0 -10 --rm veyra-0.5-test.img -o veyra-0.5-test.img.zst
-          sha256sum veyra-0.5-test.img.zst | tee SHA256SUMS-test
+          zstd -q -T0 -10 --rm veyra-0.6-test.img -o veyra-0.6-test.img.zst
+          sha256sum veyra-0.6-test.img.zst | tee SHA256SUMS-test
       - uses: actions/upload-artifact@v6
         if: success()
         with:
-          name: veyra-0.5-test
+          name: veyra-0.6-test
           path: |
-            veyra-0.5-test.img.zst
+            veyra-0.6-test.img.zst
             boot-test.log
             SHA256SUMS-test
             docs/hardware-test.md
@@ -881,7 +881,7 @@ jobs:
       - name: Abbild holen
         uses: actions/download-artifact@v7
         with:
-          name: veyra-0.5
+          name: veyra-0.6
           path: img
       - name: Pakete der Stufe 5 holen
         uses: actions/download-artifact@v7
@@ -923,7 +923,7 @@ jobs:
       - name: Desktop-Pakete ins Abbild installieren
         run: |
           set -o pipefail
-          zstd -q -d --rm img/veyra-0.5.img.zst -o veyra-desktop.img
+          zstd -q -d --rm img/veyra-0.6.img.zst -o veyra-desktop.img
           read -r start size < <(sfdisk -J veyra-desktop.img | python3 -c '
           import json, sys
           p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
@@ -979,7 +979,7 @@ jobs:
       - name: Abbild holen
         uses: actions/download-artifact@v7
         with:
-          name: veyra-0.5
+          name: veyra-0.6
           path: img
       - name: Kernel holen
         uses: actions/download-artifact@v7
@@ -992,12 +992,12 @@ jobs:
       - name: Abbild entpacken und auf leere virtuelle Platte installieren
         run: |
           set -o pipefail
-          zstd -q -d --rm img/veyra-0.5.img.zst -o veyra-0.5.img
-          read -r start size < <(sfdisk -J veyra-0.5.img | python3 -c '
+          zstd -q -d --rm img/veyra-0.6.img.zst -o veyra-0.6.img
+          read -r start size < <(sfdisk -J veyra-0.6.img | python3 -c '
           import json, sys
           p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
           print(p["start"] * 512, p["size"] * 512)')
-          loop=$(sudo losetup --find --show --read-only --offset "$start" --sizelimit "$size" veyra-0.5.img)
+          loop=$(sudo losetup --find --show --read-only --offset "$start" --sizelimit "$size" veyra-0.6.img)
           sudo mkdir -p /mnt/quelle
           sudo mount -o ro "$loop" /mnt/quelle
           truncate -s 8G rettung.img
@@ -1008,19 +1008,19 @@ jobs:
 
       - name: ISO bauen
         run: |
-          sudo image/build-iso.sh veyra-0.5.img k/kernel veyra-0.5-live.iso
-          sudo chown "$(id -u):$(id -g)" veyra-0.5-live.iso
-          rm -f veyra-0.5.img
-          sha256sum veyra-0.5-live.iso | tee SHA256SUMS
+          sudo image/build-iso.sh veyra-0.6.img k/kernel veyra-0.6-live.iso
+          sudo chown "$(id -u):$(id -g)" veyra-0.6-live.iso
+          rm -f veyra-0.6.img
+          sha256sum veyra-0.6-live.iso | tee SHA256SUMS
 
       - name: Boot-Test von CD (UEFI) und Selbsttest
-        run: SELFTEST=1 MEDIUM=cdrom image/boot-test.sh veyra-0.5-live.iso boot-live.log 600
+        run: SELFTEST=1 MEDIUM=cdrom image/boot-test.sh veyra-0.6-live.iso boot-live.log 600
 
       # Recovery (0.6 Phase 4): Platte absichtlich beschaedigen (Booteintrag, Paketdatei),
       # von der Live-ISO aus mit veyra-recovery reparieren, danach startet sie wieder.
       - name: Recovery-Test (beschaedigte Platte, Reparatur von der Live-ISO)
         run: |
-          python3 image/recovery-test.py rettung.img veyra-0.5-live.iso recovery-logs
+          python3 image/recovery-test.py rettung.img veyra-0.6-live.iso recovery-logs
           rm -f rettung.img
 
       - uses: actions/upload-artifact@v6
@@ -1028,7 +1028,7 @@ jobs:
         with:
           name: veyra-live-iso
           path: |
-            veyra-0.5-live.iso
+            veyra-0.6-live.iso
             SHA256SUMS
             boot-live.log
           retention-days: 7

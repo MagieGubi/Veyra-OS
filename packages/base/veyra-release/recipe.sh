@@ -1,6 +1,6 @@
 # Veyra-Systemidentitaet: /etc/os-release und /etc/veyra-release.
 pkgname=veyra-release
-pkgver=0.5.0
+pkgver=0.6.0
 pkgrel=1
 pkgdesc="Veyra OS Systemidentitaet (os-release)"
 license=MIT

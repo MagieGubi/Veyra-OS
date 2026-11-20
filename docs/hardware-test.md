@@ -21,7 +21,7 @@ Intel-Grafik aus) und NVIDIA. Beides folgt mit eigenen Paketen.
 
 ## Ablauf
 
-1. **Testabbild** `veyra-0.5-test.img.zst` aus dem Artefakt `veyra-0.5-test` des
+1. **Testabbild** `veyra-0.6-test.img.zst` aus dem Artefakt `veyra-0.6-test` des
    letzten CI-Laufs herunterladen (nicht das Entwicklungsabbild: dort ist root ohne
    Passwort) und entpacken (z. B. mit 7-Zip, das `.zst` kann).
 2. Mit balenaEtcher oder Rufus (Modus „DD-Abbild“) auf einen USB-Stick mit mindestens

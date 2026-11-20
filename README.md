@@ -4,11 +4,12 @@ Veyra OS ist ein minimalistisches Linux-System, das vollständig aus Quellcode g
 eigener Kernel auf Linux-Basis, eigenes Basissystem ohne fremde Distribution, eigener
 Paketmanager **VPKG**, Fokus auf geringe Latenz und minimale Systemlast.
 
-> Stand: **Veyra OS 0.5.0** (First Installable System). Der Installer bringt Veyra auf
-> einen ganzen Datenträger; die installierte Platte startet, die Ersteinrichtung legt
-> root-Passwort und Benutzer an, Anmeldung, `su` und Neustart funktionieren. Alles in
-> QEMU im CI nachgewiesen ([Lauf 44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590)), **nie auf echter Hardware**.
-> Release-Notizen: [docs/release-0.5.md](docs/release-0.5.md).
+> Stand: **Veyra OS 0.6.0**. Neu gegenüber 0.5: Firewall und Kernel-Härtung, VPKG 0.6 mit
+> Spiegeln, Cache und Metapaketen, systemd-boot mit automatischem Rückfall auf den alten
+> Kernel, `veyra-recovery` in der Live-ISO, WLAN-Software (iwd) und ein experimenteller
+> Desktop (cage mit kitty unter Wayland). Alles in QEMU im CI nachgewiesen
+> ([Lauf 44731627264](https://github.com/MagieGubi/Veyra-OS/actions/runs/44731627264)), **nie auf echter Hardware**.
+> Release-Notizen: [docs/release-0.6.md](docs/release-0.6.md), Desktop: [docs/desktop.md](docs/desktop.md).
 
 ## Was schon da ist
 

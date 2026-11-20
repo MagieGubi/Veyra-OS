@@ -2,9 +2,9 @@
 
 Zwei Wege, beide ohne Installation auf dem Rechner:
 
-- **Live-ISO** `veyra-0.5-live.iso` (Artefakt `veyra-live-iso`): als CD einlegen,
+- **Live-ISO** `veyra-0.6-live.iso` (Artefakt `veyra-live-iso`): als CD einlegen,
   das System läuft im Arbeitsspeicher, Änderungen gehen beim Ausschalten verloren.
-- **Festplatte** `veyra-0.5.vdi` (Artefakt `veyra-virtualbox`): Änderungen bleiben.
+- **Festplatte** `veyra-0.6.vdi` (Artefakt `veyra-virtualbox`): Änderungen bleiben.
 
 Beide Artefakte gibt es bei jedem grünen CI-Lauf, sie werden 7 Tage aufbewahrt.
 
@@ -12,7 +12,7 @@ Beide Artefakte gibt es bei jedem grünen CI-Lauf, sie werden 7 Tage aufbewahrt.
 
 1. Artefakt `veyra-live-iso` herunterladen und entpacken.
 2. VirtualBox: **Neu**
-   - Name `Veyra`, ISO-Abbild: `veyra-0.5-live.iso`, Typ **Linux**,
+   - Name `Veyra`, ISO-Abbild: `veyra-0.6-live.iso`, Typ **Linux**,
      Version **Other Linux (64-bit)**, unbeaufsichtigte Installation **überspringen**
    - Arbeitsspeicher mindestens 2048 MB, 2 CPUs, **EFI aktivieren**
    - Keine Festplatte nötig
@@ -26,7 +26,7 @@ Beide Artefakte gibt es bei jedem grünen CI-Lauf, sie werden 7 Tage aufbewahrt.
    - Name `Veyra`, Typ **Linux**, Version **Other Linux (64-bit)**
    - Arbeitsspeicher 2048 MB, 2 CPUs
    - **EFI aktivieren** (Veyra startet ohne Bootloader direkt über UEFI)
-   - Festplatte: **Vorhandene virtuelle Festplatte verwenden**, `veyra-0.5.vdi` wählen
+   - Festplatte: **Vorhandene virtuelle Festplatte verwenden**, `veyra-0.6.vdi` wählen
 3. In den Einstellungen der VM unter **Massenspeicher** prüfen, dass die Platte an einem
    **SATA**-Controller hängt (nicht IDE). Unter **Anzeige** den Grafikcontroller
    **VMSVGA** lassen.

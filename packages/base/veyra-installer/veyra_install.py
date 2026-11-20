@@ -415,7 +415,7 @@ def richte_ein(root, hostname="veyra", melde=print):
         os.remove(fertig)
     _setze_zeile(os.path.join(etc, "login.defs"), "SU_WHEEL_ONLY", "SU_WHEEL_ONLY yes")
     with open(os.path.join(etc, "issue"), "w") as f:
-        f.write("Veyra OS 0.5 \\l\n"
+        f.write("Veyra OS 0.6 \\l\n"
                 "Beim ersten Start fragt die Ersteinrichtung an Konsole 1 nach dem root-Passwort.\n\n")
     # Reste der Live-ISO (Einhaengepunkte des Startmediums) entfernen.
     for d in glob.glob(os.path.join(etc, "systemd/system/run-veyra\\x2dlive-*.mount.d")):

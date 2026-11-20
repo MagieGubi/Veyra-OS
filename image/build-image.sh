@@ -98,7 +98,7 @@ if [ "$variante" = dev ]; then
   # Entwicklungsabbild: root ohne Passwort an der Konsole. Nicht fuer echte Rechner gedacht.
   sed -i 's/^root:[^:]*:/root::/' "$root/etc/shadow"
   cat > "$root/etc/issue" <<'ISSUE'
-Veyra OS 0.5 (Entwicklungsabbild, nur fuer VM und CI) \l
+Veyra OS 0.6 (Entwicklungsabbild, nur fuer VM und CI) \l
 Anmeldung: root, ohne Passwort.
 
 ISSUE
@@ -118,7 +118,7 @@ else
     echo 'SU_WHEEL_ONLY yes' >> "$root/etc/login.defs"
   fi
   cat > "$root/etc/issue" <<'ISSUE'
-Veyra OS 0.5 (Testabbild) \l
+Veyra OS 0.6 (Testabbild) \l
 root ist gesperrt, bis die Ersteinrichtung an Konsole 1 ein Passwort gesetzt hat.
 
 ISSUE

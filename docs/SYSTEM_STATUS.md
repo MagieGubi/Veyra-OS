@@ -1,6 +1,6 @@
 # Veyra OS: Systemstatus
 
-Stand: 17.11.2026, Veyra OS 0.5.0. Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
+Stand: 20.11.2026, Veyra OS 0.6.0. Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
 [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md), Planung: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md),
 Aufgaben mit Akzeptanzkriterien: [../ROADMAP.md](../ROADMAP.md).
 
@@ -12,9 +12,9 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 
 | Subsystem | Status | Nachweis / Stand |
 | --- | --- | --- |
-| Build-System (Stufen 1 bis 5 in GitHub Actions) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590), alle Jobs grün; Quellen gepinnt (`check-pinned.sh`: 0 offen) |
+| Build-System (Stufen 1 bis 5 in GitHub Actions) | ✅ | Lauf [44731627264](https://github.com/MagieGubi/Veyra-OS/actions/runs/44731627264), alle 16 Jobs grün; Quellen gepinnt (`check-pinned.sh`: 0 offen) |
 | Cross-Toolchain (GCC 15.2.0, glibc 2.42) | ✅ | CI |
-| Kernel 6.18.56-veyra2 | ✅ | zwei unabhängige Builds bit-identisch (Job „Kernel reproduzierbar?“) |
+| Kernel 6.18.56-veyra6 | ✅ | zwei unabhängige Builds bit-identisch (Job „Kernel reproduzierbar?“) |
 | Basissystem (68 Pakete, glibc bis systemd 257.8) | ✅ | CI Stufe 4b; reproduzierbar ungeprüft |
 | VPKG 0.5 (Installieren, Entfernen, Abhängigkeiten mit Versionsbedingungen, Konflikte, Transaktionen, Signaturen, signierter Index, `pre_remove`, gescheiterte Install-Skripte sichtbar, Netzquellen nur über https) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590), alle Jobs grün; 31 Tests als root, 32 ohne root |
 | VPKG 0.6: Quellen mit Spiegeln, Paket-Cache, Gruppen und Metapakete, update/search/clean/repo list | ✅ | 38 VPKG-Tests (zwei Spiegel mit kaputtem und veraltetem, abgebrochener Download, kaputter Cache); Selbsttest „Paketgruppen: ok“ im Lauf [44281705958](https://github.com/MagieGubi/Veyra-OS/actions/runs/44281705958); noch kein öffentliches Repository |
