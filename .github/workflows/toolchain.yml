@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh tests/audio/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -33,7 +33,7 @@ jobs:
       - name: Firewall-Regeln testen
         run: sudo apt-get install -y nftables && sudo bash tests/firewall/firewall-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
-        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh && bash tests/recovery/recovery-test.sh && bash tests/hwinfo/hwinfo-test.sh && bash tests/network/network-test.sh
+        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh && bash tests/recovery/recovery-test.sh && bash tests/hwinfo/hwinfo-test.sh && bash tests/network/network-test.sh && bash tests/audio/audio-test.sh
       - name: Konten testen (Ersteinrichtung, Kontenpruefung)
         run: sudo bash tests/konten/konten-test.sh
       - name: Abbild-Varianten testen (dev und test, mit Probe-System)
@@ -1022,6 +1022,92 @@ jobs:
         with:
           name: veyra-desktop-pakete
           path: desktop
+          retention-days: 7
+
+  audio:
+    name: Ton in QEMU (PipeWire, HD-Audio, Messung der Ausgabe)
+    needs: [image, stage6]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Werkzeuge installieren und KVM freigeben
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd fdisk e2fsprogs qemu-system-x86 ovmf
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Abbild holen
+        uses: actions/download-artifact@v7
+        with:
+          name: veyra-0.6
+          path: img
+      - name: Pakete der Stufe 6 holen
+        uses: actions/download-artifact@v7
+        with:
+          name: pakete-6
+          path: connect
+
+      - name: veyra-audio bauen, Repository-Index
+        run: |
+          rm -f connect/SHA256SUMS
+          build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir connect packages/base/veyra-audio
+          python3 packages/base/vpkg/vpkg index --stand "$(git log -1 --format=%ct)" connect
+
+      - name: Pakete signieren (wenn das Secret VPKG_SIGNING_KEY eingerichtet ist)
+        env:
+          VPKG_SIGNING_KEY: ${{ secrets.VPKG_SIGNING_KEY }}
+        run: |
+          if [ -z "$VPKG_SIGNING_KEY" ]; then
+            echo "::warning::Secret VPKG_SIGNING_KEY fehlt: Pakete der Stufe 6 bleiben unsigniert."
+            exit 0
+          fi
+          umask 077
+          key=$RUNNER_TEMP/veyra-signing-key.pem
+          printf '%s\n' "$VPKG_SIGNING_KEY" > "$key"
+          build/scripts/sign-packages.sh "$key" connect
+          rm -f "$key"
+
+      # Wie "vpkg install @veyra-audio" auf einem fertigen System (nur virtuelle Platte).
+      - name: veyra-audio ins Abbild installieren
+        run: |
+          set -o pipefail
+          zstd -q -d --rm img/veyra-0.6.img.zst -o veyra-audio.img
+          read -r start size < <(sfdisk -J veyra-audio.img | python3 -c '
+          import json, sys
+          p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
+          print(p["start"] * 512, p["size"] * 512)')
+          loop=$(sudo losetup --find --show --offset "$start" --sizelimit "$size" veyra-audio.img)
+          sudo mkdir -p /mnt/veyra
+          sudo mount "$loop" /mnt/veyra
+          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install --repo "$PWD/connect" veyra-audio | tee vpkg-install.log
+          if sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra list | grep -qE '^(lua|bluez) '; then
+            echo "Bauwerkzeuge oder Bluetooth gehoeren nicht zu veyra-audio" >&2; exit 1
+          fi
+          df -h /mnt/veyra | tee -a vpkg-install.log
+          sudo umount /mnt/veyra
+          sudo losetup -d "$loop"
+
+      - name: Ton-Test (Wiedergabe als WAV gemessen, Aufnahmeweg, Benutzerrechte)
+        run: python3 image/audio-test.py veyra-audio.img audio-logs
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: veyra-audio-test
+          path: |
+            audio-logs
+            vpkg-install.log
+          retention-days: 7
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v6
+        if: success()
+        with:
+          name: veyra-connect-pakete
+          path: connect
           retention-days: 7
 
   live-iso:

@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""veyra-audio: Ton ansehen, einstellen und pruefen (Veyra 0.7).
+
+  veyra-audio [status]              Dienste, Standard-Ausgabe und -Eingabe mit Lautstaerke
+  veyra-audio geraete [--json]      Ausgaben und Eingaben (Lautsprecher, Kopfhoerer, Mikrofone,
+                                    USB- und Bluetooth-Geraete); --json fuer andere Programme
+  veyra-audio standard ID           Geraet als Standard setzen (ID aus "geraete")
+  veyra-audio lautstaerke [ausgabe|eingabe|ID] PROZENT   z. B. 40 oder +5 oder -5
+  veyra-audio stumm [ausgabe|eingabe|ID] [an|aus|um]
+  veyra-audio test [--sekunden N]   Testton (440 Hz) auf der Standard-Ausgabe
+  veyra-audio aufnahme-test [--sekunden N]   von der Standard-Eingabe aufnehmen, Pegel zeigen
+  veyra-audio diagnose              alles fuer einen Fehlerbericht
+
+PipeWire und WirePlumber laufen bei Veyra systemweit (Dienste veyra-pipewire,
+veyra-wireplumber, veyra-pipewire-pulse). Benutzen darf den Ton, wer in der Gruppe pipewire
+ist: usermod -aG pipewire NAME
+"""
+import argparse
+import array
+import json
+import math
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import wave
+
+LAUFZEIT = os.environ.get("PIPEWIRE_RUNTIME_DIR", "/run/pipewire")
+DIENSTE = ("veyra-pipewire", "veyra-wireplumber", "veyra-pipewire-pulse")
+ENV = dict(os.environ, PIPEWIRE_RUNTIME_DIR=LAUFZEIT,
+           PULSE_SERVER=os.environ.get("PULSE_SERVER", f"unix:{LAUFZEIT}/pulse/native"))
+ZIELE = {"ausgabe": "@DEFAULT_AUDIO_SINK@", "eingabe": "@DEFAULT_AUDIO_SOURCE@"}
+
+
+class Fehler(Exception):
+    pass
+
+
+def lauf(cmd, pruefen=True, **kw):
+    if not shutil.which(cmd[0]):
+        raise Fehler(f"{cmd[0]} fehlt (vpkg install veyra-audio)")
+    r = subprocess.run(cmd, text=True, capture_output=True, env=ENV, **kw)
+    if pruefen and r.returncode != 0:
+        raise Fehler(f"{' '.join(cmd)}: {(r.stderr or r.stdout).strip() or 'Fehler'}")
+    return r
+
+
+def verbunden():
+    if not os.path.exists(os.path.join(LAUFZEIT, "pipewire-0")):
+        raise Fehler(f"kein PipeWire unter {LAUFZEIT} (systemctl status veyra-pipewire; "
+                     "Zugriff nur fuer root und die Gruppe pipewire)")
+
+
+def dienst_zustand(name):
+    if not shutil.which("systemctl"):
+        return "unbekannt"
+    r = subprocess.run(["systemctl", "is-active", f"{name}.service"], text=True, capture_output=True)
+    return r.stdout.strip() or "unbekannt"
+
+
+def geraete():
+    """Ausgaben und Eingaben aus pw-dump, mit Standard-Markierung."""
+    verbunden()
+    daten = json.loads(lauf(["pw-dump"]).stdout or "[]")
+    standard = {}
+    for o in daten:
+        if o.get("type") == "PipeWire:Interface:Metadata" and \
+                (o.get("props") or {}).get("metadata.name") == "default":
+            for e in o.get("metadata") or []:
+                if e.get("key") in ("default.audio.sink", "default.audio.source"):
+                    wert = e.get("value")
+                    if isinstance(wert, str):
+                        try:
+                            wert = json.loads(wert)
+                        except ValueError:
+                            wert = {}
+                    standard[e["key"]] = (wert or {}).get("name")
+    out = []
+    for o in daten:
+        if o.get("type") != "PipeWire:Interface:Node":
+            continue
+        p = (o.get("info") or {}).get("props") or {}
+        klasse = p.get("media.class", "")
+        if klasse not in ("Audio/Sink", "Audio/Source"):
+            continue
+        art = "ausgabe" if klasse == "Audio/Sink" else "eingabe"
+        name = p.get("node.name", "")
+        lautstaerke, stumm = None, None
+        for props in ((o.get("info") or {}).get("params") or {}).get("Props") or []:
+            vols = props.get("channelVolumes")
+            if vols:
+                # PipeWire speichert kubisch; wpctl und Regler zeigen die dritte Wurzel.
+                lautstaerke = round(100 * (sum(vols) / len(vols)) ** (1 / 3))
+            if "mute" in props:
+                stumm = bool(props["mute"])
+        bus = "bluetooth" if name.startswith("bluez_") or p.get("api.bluez5.address") \
+            else p.get("device.bus")
+        out.append({"id": o.get("id"), "art": art, "name": name,
+                    "beschreibung": p.get("node.description") or p.get("node.nick") or name,
+                    "bus": bus,
+                    "standard": standard.get(f"default.audio.{'sink' if art == 'ausgabe' else 'source'}") == name,
+                    "lautstaerke": lautstaerke, "stumm": stumm})
+    return sorted(out, key=lambda g: (g["art"], g["id"]))
+
+
+def ziel(wert):
+    if wert in ZIELE:
+        return ZIELE[wert]
+    if wert.isdigit():
+        return wert
+    raise Fehler(f"unbekanntes Ziel {wert!r} (ausgabe, eingabe oder eine ID aus 'veyra-audio geraete')")
+
+
+def cmd_status(_a):
+    for d in DIENSTE:
+        print(f"{d:<24} {dienst_zustand(d)}")
+    try:
+        gs = geraete()
+    except Fehler as e:
+        print(f"Ton: {e}")
+        return 1
+    for art in ("ausgabe", "eingabe"):
+        s = [g for g in gs if g["art"] == art and g["standard"]]
+        if s:
+            g = s[0]
+            laut = "?" if g["lautstaerke"] is None else f"{g['lautstaerke']} %"
+            print(f"Standard-{art}: {g['beschreibung']} (ID {g['id']}), {laut}{', stumm' if g['stumm'] else ''}")
+        else:
+            print(f"Standard-{art}: keine")
+    if not gs:
+        print("Keine Ausgaben oder Eingaben. 'veyra-audio diagnose' zeigt, ob eine Soundkarte erkannt ist.")
+    return 0
+
+
+def cmd_geraete(a):
+    gs = geraete()
+    if a.json:
+        print(json.dumps(gs, indent=1, ensure_ascii=False))
+        return 0
+    if not gs:
+        print("Keine Ausgaben oder Eingaben.")
+        return 1
+    for g in gs:
+        laut = "-" if g["lautstaerke"] is None else f"{g['lautstaerke']} %"
+        print(f"{'*' if g['standard'] else ' '} {g['id']:>4}  {g['art']:<8} {laut:>6}"
+              f"{' stumm' if g['stumm'] else '      '}  {g['beschreibung']}"
+              f"{' [' + g['bus'] + ']' if g['bus'] else ''}")
+    print("(* = Standard)")
+    return 0
+
+
+def cmd_standard(a):
+    verbunden()
+    if not a.id.isdigit() or not any(g["id"] == int(a.id) for g in geraete()):
+        raise Fehler(f"keine Ausgabe oder Eingabe mit ID {a.id} ('veyra-audio geraete')")
+    lauf(["wpctl", "set-default", a.id])
+    print(f"Standard ist jetzt ID {a.id}.")
+    return 0
+
+
+def cmd_lautstaerke(a):
+    verbunden()
+    wert = a.wert.rstrip("%")
+    vorz = wert[0] if wert[:1] in "+-" else ""
+    zahl = wert[1:] if vorz else wert
+    if not zahl.isdigit() or int(zahl) > 150:
+        raise Fehler("Lautstaerke als Prozent: 0 bis 150, oder +N / -N")
+    arg = f"{zahl}%{vorz}" if vorz else f"{zahl}%"
+    lauf(["wpctl", "set-volume", "-l", "1.5", ziel(a.ziel), arg])
+    print(lauf(["wpctl", "get-volume", ziel(a.ziel)]).stdout.strip())
+    return 0
+
+
+def cmd_stumm(a):
+    if a.ziel in ("an", "aus", "um"):           # "veyra-audio stumm an"
+        a.ziel, a.zustand = "ausgabe", a.ziel
+    verbunden()
+    lauf(["wpctl", "set-mute", ziel(a.ziel), {"an": "1", "aus": "0", "um": "toggle"}[a.zustand]])
+    print(lauf(["wpctl", "get-volume", ziel(a.ziel)]).stdout.strip())
+    return 0
+
+
+def ton_datei(pfad, sekunden, frequenz=440, rate=48000):
+    n = int(sekunden * rate)
+    daten = array.array("h", (int(12000 * math.sin(2 * math.pi * frequenz * i / rate)) for i in range(n)))
+    with wave.open(pfad, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(daten.tobytes())
+
+
+def pegel(pfad):
+    """(Sekunden, Spitze in dBFS, RMS in dBFS) einer 16-Bit-WAV-Datei."""
+    with wave.open(pfad, "rb") as w:
+        if w.getsampwidth() != 2:
+            raise Fehler("unerwartetes Aufnahmeformat")
+        rate, kan = w.getframerate(), w.getnchannels()
+        daten = array.array("h", w.readframes(w.getnframes()))
+    if not daten:
+        return 0.0, None, None
+    spitze = max(abs(x) for x in daten)
+    rms = math.sqrt(sum(x * x for x in daten) / len(daten))
+
+    def db(x):
+        return round(20 * math.log10(x / 32768), 1) if x > 0 else None
+    return len(daten) / kan / rate, db(spitze), db(rms)
+
+
+def cmd_test(a):
+    verbunden()
+    with tempfile.TemporaryDirectory() as t:
+        f = os.path.join(t, "ton.wav")
+        ton_datei(f, a.sekunden)
+        print(f"Spiele {a.sekunden:g} s Testton (440 Hz) auf der Standard-Ausgabe ...")
+        lauf(["pw-play", f])
+    print("Testton fertig. Nichts gehoert? 'veyra-audio status' und 'veyra-audio geraete' zeigen "
+          "Standard-Ausgabe und Lautstaerke.")
+    return 0
+
+
+def cmd_aufnahme_test(a):
+    verbunden()
+    with tempfile.TemporaryDirectory() as t:
+        f = os.path.join(t, "aufnahme.wav")
+        p = subprocess.Popen(["pw-record", "--rate", "48000", "--channels", "1", "--format", "s16", f],
+                             env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        time.sleep(a.sekunden)
+        p.send_signal(signal.SIGINT)
+        try:
+            _, err = p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            raise Fehler("pw-record beendet sich nicht")
+        if not os.path.exists(f) or os.path.getsize(f) <= 44:
+            raise Fehler(f"keine Aufnahme ({(err or '').strip() or 'leere Datei'})")
+        dauer, spitze, rms = pegel(f)
+    print(f"Aufnahme: {dauer:.1f} s, Spitze {spitze if spitze is not None else '-inf'} dBFS, "
+          f"Mittel {rms if rms is not None else '-inf'} dBFS")
+    if spitze is None or spitze < -60:
+        print("Nur Stille: Mikrofon stumm, falsche Eingabe oder Treiber/Firmware fehlt "
+              "('veyra-audio geraete', 'veyra-audio diagnose').")
+        return 1
+    return 0
+
+
+def cmd_diagnose(_a):
+    teile = [("Dienste", lambda: "\n".join(f"{d}: {dienst_zustand(d)}" for d in DIENSTE)),
+             ("Soundkarten (/proc/asound/cards)", lambda: open("/proc/asound/cards").read().strip()),
+             ("Geraete", lambda: json.dumps(geraete(), indent=1, ensure_ascii=False))]
+    for titel, cmd in (("ALSA-Wiedergabegeraete", ["aplay", "-l"]),
+                       ("ALSA-Aufnahmegeraete", ["arecord", "-l"]),
+                       ("wpctl status", ["wpctl", "status"]),
+                       ("Journal", ["journalctl", "-b", "--no-pager", "-n", "60", "-u", "veyra-pipewire",
+                                    "-u", "veyra-wireplumber", "-u", "veyra-pipewire-pulse"]),
+                       ("Kernel: Ton und Firmware", ["journalctl", "-k", "-b", "--no-pager", "-g",
+                                                     "snd|sof|hda|firmware|audio"])):
+        def f(cmd=cmd):
+            if not shutil.which(cmd[0]):
+                return "(Programm fehlt)"
+            r = subprocess.run(cmd, text=True, capture_output=True, env=ENV)
+            return (r.stdout + r.stderr).strip() or "(leer)"
+        teile.append((titel, f))
+    for titel, f in teile:
+        print(f"===== {titel}")
+        try:
+            print(f())
+        except (OSError, ValueError, Fehler) as e:
+            print(f"(nicht lesbar: {e})")
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="veyra-audio", description=__doc__.split("\n")[0],
+                                 epilog="\n".join(__doc__.split("\n")[2:]),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="befehl")
+    sub.add_parser("status")
+    p = sub.add_parser("geraete")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("standard")
+    p.add_argument("id")
+    p = sub.add_parser("lautstaerke")
+    p.add_argument("ziel", nargs="?", default="ausgabe")
+    p.add_argument("wert")
+    p = sub.add_parser("stumm")
+    p.add_argument("ziel", nargs="?", default="ausgabe")
+    p.add_argument("zustand", nargs="?", default="um", choices=("an", "aus", "um"))
+    for n in ("test", "aufnahme-test"):
+        p = sub.add_parser(n)
+        p.add_argument("--sekunden", type=float, default=2.0)
+    sub.add_parser("diagnose")
+    a = ap.parse_args(argv)
+    if getattr(a, "sekunden", 1) <= 0 or getattr(a, "sekunden", 1) > 60:
+        print("veyra-audio: --sekunden zwischen 0 und 60", file=sys.stderr)
+        return 2
+    try:
+        return {None: cmd_status, "status": cmd_status, "geraete": cmd_geraete,
+                "standard": cmd_standard, "lautstaerke": cmd_lautstaerke, "stumm": cmd_stumm,
+                "test": cmd_test, "aufnahme-test": cmd_aufnahme_test,
+                "diagnose": cmd_diagnose}[a.befehl](a)
+    except Fehler as e:
+        print(f"veyra-audio: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

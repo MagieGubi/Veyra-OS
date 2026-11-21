@@ -1,0 +1,21 @@
+[Unit]
+Description=PulseAudio-Schnittstelle von PipeWire (systemweit, Veyra)
+Documentation=man:veyra-audio(1)
+After=veyra-pipewire.service
+BindsTo=veyra-pipewire.service
+
+[Service]
+Type=simple
+User=pipewire
+Group=pipewire
+UMask=0007
+Environment=XDG_RUNTIME_DIR=/run/pipewire PIPEWIRE_RUNTIME_DIR=/run/pipewire HOME=/var/lib/pipewire
+ExecStart=/usr/bin/pipewire-pulse
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=veyra-pipewire.service

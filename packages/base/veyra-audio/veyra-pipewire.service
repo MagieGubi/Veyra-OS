@@ -1,0 +1,30 @@
+[Unit]
+Description=PipeWire-Audio-Server (systemweit, Veyra)
+Documentation=man:veyra-audio(1)
+# Veyra hat kein PAM und damit keine Benutzer-Sitzungen von systemd. PipeWire laeuft deshalb
+# einmal fuer das ganze System als Benutzer pipewire; Programme der Gruppe pipewire verbinden
+# sich ueber /run/pipewire/pipewire-0 (siehe /etc/profile.d/veyra-audio.sh).
+After=dbus.service systemd-udevd.service
+Wants=veyra-wireplumber.service veyra-pipewire-pulse.service
+
+[Service]
+Type=simple
+User=pipewire
+Group=pipewire
+SupplementaryGroups=audio
+UMask=0007
+RuntimeDirectory=pipewire
+RuntimeDirectoryMode=0750
+StateDirectory=pipewire
+Environment=XDG_RUNTIME_DIR=/run/pipewire PIPEWIRE_RUNTIME_DIR=/run/pipewire HOME=/var/lib/pipewire
+ExecStart=/usr/bin/pipewire
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+LimitRTPRIO=95
+LimitMEMLOCK=64M
+
+[Install]
+WantedBy=multi-user.target
