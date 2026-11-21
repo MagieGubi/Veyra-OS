@@ -1,0 +1,1 @@
+../veyra-firmware-intel-wlan/firmware-paket.py

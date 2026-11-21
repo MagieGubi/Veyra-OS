@@ -1,0 +1,24 @@
+{
+ "format": 1,
+ "hinweis": "Firmware-Pakete von Veyra und woran veyra-hwinfo erkennt, dass sie gebraucht werden. Dateien wie im Rezept (_dateien); tests/hwinfo/hwinfo-test.sh prueft das.",
+ "pakete": [
+  {"paket": "veyra-firmware-intel-wlan", "beschreibung": "Intel-WLAN", "treiber": ["iwlwifi"],
+   "geraete": [{"bus": "pci", "hersteller": "8086", "klasse": "0280"}],
+   "dateien": ["intel/iwlwifi/iwlwifi-so-a0-gf-a0-89.ucode", "intel/iwlwifi/iwlwifi-so-a0-gf-a0.pnvm",
+               "intel/iwlwifi/iwlwifi-so-a0-hr-b0-89.ucode", "intel/iwlwifi/iwlwifi-ty-a0-gf-a0-89.ucode",
+               "intel/iwlwifi/iwlwifi-ty-a0-gf-a0.pnvm"]},
+  {"paket": "veyra-firmware-intel-grafik", "beschreibung": "Intel-Grafik", "treiber": ["i915"],
+   "geraete": [{"bus": "pci", "hersteller": "8086", "klasse": "03"}],
+   "dateien": ["i915/adlp_dmc.bin", "i915/adlp_guc_70.bin", "i915/tgl_huc.bin", "i915/adls_dmc_ver2_01.bin",
+               "i915/tgl_guc_70.bin"]},
+  {"paket": "veyra-firmware-intel-bluetooth", "beschreibung": "Intel-Bluetooth", "treiber": ["btusb"],
+   "geraete": [{"bus": "usb", "hersteller": "8087"}],
+   "dateien": ["intel/ibt-0040-0041.ddc", "intel/ibt-0040-0041.sfi", "intel/ibt-0040-1020.ddc",
+               "intel/ibt-0040-1020.sfi", "intel/ibt-0041-0041.ddc", "intel/ibt-0041-0041.sfi",
+               "intel/ibt-0093-0041.ddc", "intel/ibt-0093-0041.sfi", "intel/ibt-0093-0291.ddc",
+               "intel/ibt-0093-0291.sfi", "intel/ibt-0093-1050.ddc", "intel/ibt-0093-1050.sfi",
+               "intel/ibt-0093-4150.ddc", "intel/ibt-0093-4150.sfi", "intel/ibt-0180-0041.ddc",
+               "intel/ibt-0180-0041.sfi", "intel/ibt-0180-1050.ddc", "intel/ibt-0180-1050.sfi",
+               "intel/ibt-0180-4150.ddc", "intel/ibt-0180-4150.sfi"]}
+ ]
+}

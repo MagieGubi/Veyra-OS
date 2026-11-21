@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""veyra-hwinfo: Hardware erkennen und beschreiben (Veyra 0.6). Liest nur, aktiviert nichts.
+"""veyra-hwinfo: Hardware erkennen und beschreiben (Veyra 0.7). Liest nur, aktiviert nichts.
 
   veyra-hwinfo            Text
   veyra-hwinfo --json     dasselbe als JSON (z. B. fuer Fehlerberichte)
+  veyra-hwinfo firmware   nur Firmware: welche Pakete die Hardware braucht, welche fehlen,
+                          welche Dateien der Kernel beim Start vermisst hat
 
 Quellen sind ausschliesslich /proc und /sys: CPU, Arbeitsspeicher, Mainboard und Firmware,
 PCI- und USB-Geraete, NVMe- und SATA-Datentraeger, Grafik, Netzwerk (Ethernet und WLAN) und
@@ -15,7 +17,12 @@ import glob
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+
+KATALOG = "/usr/share/veyra-hwinfo/firmware-katalog.json"
+FW_DATEI_RE = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*\.(?:bin|ucode|pnvm|sfi|ddc|ri|tplg|fw|sbin))\b")
 
 # Hersteller-IDs (PCI und USB teilen sich viele davon); Veyra hat keine pci.ids-Datenbank.
 HERSTELLER = {
@@ -208,19 +215,103 @@ def audio(s, pci_liste):
     return {"pci": [p for p in pci_liste if p["klasse"].startswith("04")], "karten": karten}
 
 
+def katalog(s):
+    for pfad in (s.p(KATALOG), os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware-katalog.json")):
+        try:
+            with open(pfad) as f:
+                return json.load(f)["pakete"]
+        except (OSError, ValueError, KeyError):
+            continue
+    return []
+
+
+def kernel_log(s):
+    """Kernel-Meldungen dieses Starts (Tests: Datei aus VEYRA_HWINFO_KERNELLOG)."""
+    test = os.environ.get("VEYRA_HWINFO_KERNELLOG")
+    if test:
+        return open(test, errors="replace").read()
+    if s.root != "/" or not shutil.which("journalctl"):
+        return ""
+    r = subprocess.run(["journalctl", "-k", "-b", "-o", "cat", "--no-pager", "-g", "firmware"],
+                       text=True, capture_output=True)
+    return r.stdout
+
+
+def passt(geraet, m, bus):
+    if m["bus"] != bus or not geraet["id"].startswith(m["hersteller"] + ":"):
+        return False
+    return bus != "pci" or geraet["klasse"].startswith(m.get("klasse", ""))
+
+
+def firmware(s, pci_liste, usb_liste):
+    """Je Firmware-Paket: gebraucht (passende Hardware), installiert, Version; dazu Dateien, die
+    der Kernel vermisst hat, mit dem Paket, das sie liefert."""
+    pakete = []
+    for k in katalog(s):
+        geraete = [g for m in k["geraete"] for g in (pci_liste if m["bus"] == "pci" else usb_liste)
+                   if passt(g, m, m["bus"])]
+        meta = s.p(f"/usr/share/veyra/firmware/{k['paket']}.json")
+        version = None
+        if os.path.exists(meta):
+            try:
+                version = json.load(open(meta)).get("version")
+            except ValueError:
+                version = "?"
+        dateien_da = any(os.path.exists(s.p(f"/usr/lib/firmware/{d}")) or
+                         os.path.exists(s.p(f"/usr/lib/firmware/{os.path.basename(d)}")) for d in k["dateien"])
+        ohne_treiber = [g for g in geraete if not (g["treiber"] if isinstance(g["treiber"], list) else g["treiber"])]
+        pakete.append({"paket": k["paket"], "beschreibung": k["beschreibung"], "treiber": k["treiber"],
+                       "gebraucht": bool(geraete), "installiert": version is not None or dateien_da,
+                       "version": version, "geraete": [g.get("adresse") or g.get("bus") for g in geraete],
+                       "ohne_treiber": bool(ohne_treiber)})
+    vermisst = []
+    for z in kernel_log(s).splitlines():
+        if not re.search(r"fail|error|not found|unable", z, re.I):
+            continue
+        for d in FW_DATEI_RE.findall(z):
+            if any(v["datei"] == d for v in vermisst):
+                continue
+            if os.path.exists(s.p(f"/usr/lib/firmware/{d}")):
+                continue          # inzwischen installiert
+            paket = next((k["paket"] for k in katalog(s) if d in k["dateien"]
+                          or d in (os.path.basename(x) for x in k["dateien"])), None)
+            vermisst.append({"datei": d, "paket": paket})
+    return {"pakete": pakete, "vermisst": vermisst}
+
+
 def hinweise(s, h):
     """Was der Benutzer tun kann; veyra-hwinfo selbst installiert und aktiviert nichts."""
     out = []
-    intel_wlan = [x for x in h["wlan"]["pci"] if x["id"].startswith("8086:")]
-    if intel_wlan and not h["wlan"]["geraete"]:
-        if not s.liste("/usr/lib/firmware/iwlwifi-*.ucode"):
-            out.append("Intel-WLAN ohne Firmware: vpkg install veyra-firmware-intel-wlan, danach neu starten")
-        elif not any(x["treiber"] for x in intel_wlan):
-            out.append("Intel-WLAN: Firmware ist da, aber der Treiber iwlwifi ist nicht geladen "
-                       "(Meldungen: dmesg | grep iwlwifi)")
+    for p in h["firmware"]["pakete"]:
+        if p["gebraucht"] and not p["installiert"]:
+            out.append(f"{p['beschreibung']} ohne Firmware: vpkg install {p['paket']}, danach neu starten")
+        elif p["gebraucht"] and p["ohne_treiber"]:
+            out.append(f"{p['beschreibung']}: Firmware ist da, aber der Treiber {', '.join(p['treiber'])} "
+                       f"ist nicht geladen (Meldungen: dmesg | grep {p['treiber'][0]})")
+    for v in h["firmware"]["vermisst"]:
+        if v["paket"] and not any(v["paket"] in x for x in out):
+            out.append(f"Kernel vermisst {v['datei']}: vpkg install {v['paket']}")
+        elif not v["paket"]:
+            out.append(f"Kernel vermisst {v['datei']} (in keinem Veyra-Paket; bitte melden)")
     if any(x["id"].startswith("10de:") and not x["treiber"] for x in h["grafik"]["pci"]):
         out.append("NVIDIA-Grafik ohne Treiber: Veyra nutzt vorerst die Intel-Grafik")
     return out
+
+
+def firmware_text(fw):
+    z = ["Firmware:"]
+    for p in fw["pakete"]:
+        if not p["gebraucht"] and not p["installiert"]:
+            continue
+        zustand = (f"installiert ({p['version']})" if p["version"] else "Dateien vorhanden") if p["installiert"] \
+            else "fehlt"
+        z.append(f"  {p['paket']:<32} {zustand:<24} {p['beschreibung']}"
+                 + ("" if p["gebraucht"] else ", keine passende Hardware"))
+    if len(z) == 1:
+        z.append("  (keine Hardware, die ein Veyra-Firmware-Paket braucht)")
+    for v in fw["vermisst"]:
+        z.append(f"  Kernel vermisst: {v['datei']} -> {v['paket'] or 'in keinem Veyra-Paket'}")
+    return z
 
 
 def erfasse(root="/"):
@@ -233,6 +324,7 @@ def erfasse(root="/"):
          "pci": p, "usb": usb(s), "datentraeger": datentraeger(s), "netzwerk": net,
          "wlan": {"geraete": [x for x in net if x["art"] == "WLAN"], "pci": wlan_pci},
          "grafik": grafik(s, p), "audio": audio(s, p), "ohne_treiber": ohne}
+    h["firmware"] = firmware(s, p, h["usb"])
     h["hinweise"] = hinweise(s, h)
     return h
 
@@ -290,6 +382,8 @@ def text(h):
             z.append(f"  {p['adresse']:<14} [{p['id']}] {p['hersteller']}: {p['art']}")
     else:
         z.append("Alle Geraete haben einen Treiber.")
+    z.append("")
+    z.extend(firmware_text(h["firmware"]))
     if h["hinweise"]:
         z.append("")
         z.append("Hinweise:")
@@ -299,10 +393,19 @@ def text(h):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="veyra-hwinfo", description=__doc__.split("\n")[0])
+    ap.add_argument("bereich", nargs="?", choices=("firmware",), help="nur diesen Bereich zeigen")
     ap.add_argument("--json", action="store_true", help="Ausgabe als JSON")
     ap.add_argument("--root", default="/", help=argparse.SUPPRESS)   # fuer Tests
     a = ap.parse_args(argv)
     h = erfasse(a.root)
+    if a.bereich == "firmware":
+        fw = dict(h["firmware"], hinweise=[x for x in h["hinweise"] if "Firmware" in x or "vermisst" in x])
+        if a.json:
+            print(json.dumps(fw, ensure_ascii=False, indent=2))
+        else:
+            print("\n".join(firmware_text(fw) + [f"  Hinweis: {x}" for x in fw["hinweise"]]))
+        return 1 if any(p["gebraucht"] and not p["installiert"] for p in fw["pakete"]) or \
+            any(v["paket"] for v in fw["vermisst"]) else 0
     print(json.dumps(h, ensure_ascii=False, indent=2) if a.json else text(h))
     return 0
 

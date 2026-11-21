@@ -6,7 +6,7 @@
 # Gibt es die Datenpartition (/mnt/daten, USB-Stick), landen Ergebnis und Kernel-Log
 # zusaetzlich dort, damit sie sich unter Windows lesen lassen.
 pkgname=veyra-selftest
-pkgver=0.12
+pkgver=0.13
 pkgrel=1
 pkgdesc="Selbsttest des Entwicklungsabbilds (nicht fuer echte Systeme)"
 license=MIT
@@ -169,8 +169,17 @@ h = json.load(sys.stdin)
 assert h["cpu"]["threads"] == os.cpu_count(), "Threads"
 assert h["speicher"]["gesamt_mib"] > 0, "Speicher"
 assert any(n["treiber"] for n in h["netzwerk"]), "Netzwerkadapter"
+assert len(h["firmware"]["pakete"]) >= 3, "Firmware-Katalog"
+# Installierte Firmware-Pakete (Testabbild): jede Datei wie in ihrer Beschreibung
+import glob, hashlib
+geprueft = 0
+for b in glob.glob("/usr/share/veyra/firmware/*.json"):
+    for d in json.load(open(b))["dateien"]:
+        with open("/usr/lib/firmware/" + d["pfad"], "rb") as f:
+            assert hashlib.sha256(f.read()).hexdigest() == d["sha256"], d["pfad"]
+        geprueft += 1
 c, m, p, o = h["cpu"]["threads"], h["speicher"]["gesamt_mib"], len(h["pci"]), len(h["ohne_treiber"])
-print(f"{c} Threads, {m} MiB, {p} PCI-Geraete, {o} ohne Treiber")' > /run/veyra-hwinfo.txt 2>&1; then
+print(f"{c} Threads, {m} MiB, {p} PCI-Geraete, {o} ohne Treiber, {geprueft} Firmware-Dateien geprueft")' > /run/veyra-hwinfo.txt 2>&1; then
   log "Hardware: ok ($(cat /run/veyra-hwinfo.txt))"
 else
   log "Hardware: FEHLER ($(tail -n 1 /run/veyra-hwinfo.txt 2>/dev/null))"; fail=1

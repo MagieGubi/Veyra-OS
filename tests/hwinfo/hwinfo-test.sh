@@ -13,9 +13,23 @@ ok() { echo "ok $n - $1"; }
 hw() { python3 "$pkg/veyra-hwinfo" --root "$t/r" "$@"; }
 
 n=$((n + 1))
-grep -q "$(sha256sum "$pkg/veyra-hwinfo" | cut -d' ' -f1)" "$pkg/recipe.sh" \
-  || fail "sha256sums in $pkg/recipe.sh passt nicht zu veyra-hwinfo"
-ok "Rezept passt zum Programm"
+for f in veyra-hwinfo firmware-katalog.json; do
+  grep -q "$(sha256sum "$pkg/$f" | cut -d' ' -f1)" "$pkg/recipe.sh" \
+    || fail "sha256sums in $pkg/recipe.sh passt nicht zu $f"
+done
+# Katalog und Firmware-Rezepte stimmen ueberein (Paketnamen und Dateien)
+python3 - "$pkg/firmware-katalog.json" "$here/packages/base" <<'PY' || fail "Firmware-Katalog passt nicht zu den Rezepten"
+import glob, json, os, subprocess, sys
+kat = {k["paket"]: k for k in json.load(open(sys.argv[1]))["pakete"]}
+rezepte = sorted(glob.glob(os.path.join(sys.argv[2], "veyra-firmware-*/recipe.sh")))
+assert {os.path.basename(os.path.dirname(r)) for r in rezepte} == set(kat), (sorted(kat), rezepte)
+for r in rezepte:
+    d = subprocess.run(["bash", "-c", '. "$1"; printf "%s\\n" "${_dateien[@]}"', "-", r],
+                       capture_output=True, text=True, check=True).stdout.split()
+    name = os.path.basename(os.path.dirname(r))
+    assert d == kat[name]["dateien"], (name, d)
+PY
+ok "Rezept passt zum Programm, Firmware-Katalog passt zu den Firmware-Rezepten"
 
 python3 - "$t/r" <<'PY'
 import os, sys
@@ -112,10 +126,43 @@ ok "JSON vollstaendig; keine Seriennummern und MAC-Adressen in Text und JSON"
 
 n=$((n + 1))
 grep -q 'Intel-WLAN ohne Firmware: vpkg install veyra-firmware-intel-wlan' "$t/text" || fail "Hinweis auf das Firmware-Paket fehlt"
+grep -q 'Intel-Grafik ohne Firmware: vpkg install veyra-firmware-intel-grafik' "$t/text" || fail "Hinweis Intel-Grafik fehlt"
+grep -q 'Intel-Bluetooth ohne Firmware: vpkg install veyra-firmware-intel-bluetooth' "$t/text" || fail "Hinweis Intel-Bluetooth fehlt"
 grep -q 'NVIDIA-Grafik ohne Treiber' "$t/text" || fail "Hinweis zur NVIDIA-Grafik fehlt"
 mkdir -p "$t/r/usr/lib/firmware" && touch "$t/r/usr/lib/firmware/iwlwifi-so-a0-gf-a0-89.ucode"
 hw > "$t/text2"
 grep -q 'Firmware ist da, aber der Treiber iwlwifi ist nicht geladen' "$t/text2" || fail "Hinweis bei vorhandener Firmware falsch"
 ok "Hinweise: Firmware-Paket fuer Intel-WLAN, Treiber fehlt trotz Firmware, NVIDIA"
+
+n=$((n + 1))
+# Firmware-Paket installiert (Beschreibung von firmware-paket.py), Kernel vermisst eine Datei
+mkdir -p "$t/r/usr/share/veyra/firmware"
+echo '{"format": 1, "paket": "veyra-firmware-intel-grafik", "version": "20261019"}' \
+  > "$t/r/usr/share/veyra/firmware/veyra-firmware-intel-grafik.json"
+cat > "$t/kernel.log" <<'LOG'
+i915 0000:00:02.0: [drm] Finished loading DMC firmware i915/adlp_dmc.bin (v2.20)
+Bluetooth: hci0: Failed to load Intel firmware file intel/ibt-0040-0041.sfi (-2)
+iwlwifi 0000:00:14.3: Direct firmware load for iwlwifi-so-a0-gf-a0-89.ucode failed with error -2
+snd_sof_pci_intel_tgl 0000:00:1f.3: SOF firmware and/or topology file not found.
+amdgpu 0000:03:00.0: Direct firmware load for amdgpu/psp_13_0_4_toc.bin failed with error -2
+LOG
+rc=0; VEYRA_HWINFO_KERNELLOG=$t/kernel.log hw firmware > "$t/fw" || rc=$?
+[ "$rc" = 1 ] || fail "firmware: Status $rc bei fehlender Firmware"
+grep -q '^  veyra-firmware-intel-grafik *installiert (20261019) *Intel-Grafik$' "$t/fw" || fail "Grafik: $(cat "$t/fw")"
+grep -q '^  veyra-firmware-intel-bluetooth *fehlt' "$t/fw" || fail "Bluetooth: $(cat "$t/fw")"
+grep -q 'Kernel vermisst: intel/ibt-0040-0041.sfi -> veyra-firmware-intel-bluetooth' "$t/fw" || fail "vermisst: $(cat "$t/fw")"
+grep -q 'Kernel vermisst: amdgpu/psp_13_0_4_toc.bin -> in keinem Veyra-Paket' "$t/fw" || fail "unbekannte Datei: $(cat "$t/fw")"
+grep -q 'adlp_dmc' "$t/fw" && fail "geladene Firmware als vermisst gemeldet"
+VEYRA_HWINFO_KERNELLOG=$t/kernel.log hw firmware --json > "$t/fw.json" || true
+python3 - "$t/fw.json" <<'PY' || fail "firmware --json: $(cat "$t/fw.json")"
+import json, sys
+f = json.load(open(sys.argv[1]))
+p = {x["paket"]: x for x in f["pakete"]}
+assert p["veyra-firmware-intel-grafik"]["installiert"] and p["veyra-firmware-intel-grafik"]["version"] == "20261019"
+assert p["veyra-firmware-intel-bluetooth"]["gebraucht"] and not p["veyra-firmware-intel-bluetooth"]["installiert"]
+assert {v["datei"] for v in f["vermisst"]} == {"intel/ibt-0040-0041.sfi", "amdgpu/psp_13_0_4_toc.bin"}, f["vermisst"]
+assert any("vpkg install veyra-firmware-intel-bluetooth" in h for h in f["hinweise"])
+PY
+ok "firmware: installiert mit Version, fehlend, vom Kernel vermisste Dateien mit Paket"
 
 echo "Alle $n Hardware-Tests bestanden."
