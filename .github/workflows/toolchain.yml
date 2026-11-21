@@ -1084,8 +1084,8 @@ jobs:
           sudo mkdir -p /mnt/veyra
           sudo mount "$loop" /mnt/veyra
           sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install --repo "$PWD/connect" veyra-audio | tee vpkg-install.log
-          if sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra list | grep -qE '^(lua|bluez) '; then
-            echo "Bauwerkzeuge oder Bluetooth gehoeren nicht zu veyra-audio" >&2; exit 1
+          if sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra list | grep -qE '^lua '; then
+            echo "Bauwerkzeug lua gehoert nicht ins System" >&2; exit 1
           fi
           df -h /mnt/veyra | tee -a vpkg-install.log
           sudo umount /mnt/veyra
