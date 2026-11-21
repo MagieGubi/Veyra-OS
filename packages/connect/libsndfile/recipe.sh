@@ -10,8 +10,9 @@ makedepends=()
 
 build() {
   cd "libsndfile-$pkgver"
-  # Ohne externe Codecs (FLAC, Ogg, Opus, MP3): nur unkomprimierte Formate.
-  ./configure --prefix=/usr --disable-static --disable-external-libs --disable-mpeg \
+  # Ohne externe Codecs (FLAC, Ogg, Opus, MP3): nur unkomprimierte Formate. GCC 15 nimmt
+  # C23 als Standard; der ALAC-Code definiert dort false/bool selbst, darum gnu17.
+  CFLAGS="${CFLAGS:-} -std=gnu17" ./configure --prefix=/usr --disable-static --disable-external-libs --disable-mpeg \
     --disable-sqlite --disable-alsa --disable-full-suite
   make
 }
