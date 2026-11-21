@@ -1,0 +1,11 @@
+[Unit]
+Description=Veyra Energieprofil anwenden (veyra-power)
+Documentation=https://github.com/MagieGubi/Veyra-OS/blob/main/docs/power-management.md
+After=systemd-udev-settle.service systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/veyra-power anwenden
+
+[Install]
+WantedBy=multi-user.target

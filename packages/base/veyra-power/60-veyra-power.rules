@@ -1,0 +1,2 @@
+# veyra-power: Netzteil ein- oder ausgesteckt -> Profil "auto" neu anwenden
+SUBSYSTEM=="power_supply", ACTION=="change", ATTR{type}=="Mains", RUN+="/usr/bin/systemctl --no-block restart veyra-power.service"

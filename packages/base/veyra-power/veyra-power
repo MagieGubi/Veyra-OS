@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""veyra-power: Akku, Netzteil, CPU-Energiemodus und Ruhezustand (Veyra 0.7).
+
+  veyra-power [status] [--json]   Netzteil, Akku (Ladung, Zustand, Abnutzung, Restzeit), CPU-Regler
+                                  und Energievorgabe, Plattform-Profil, Ruhezustaende, Deckel
+  veyra-power profil [NAME]       Energieprofil zeigen oder setzen:
+                                    auto           am Netzteil ausgewogen, im Akkubetrieb sparsam
+                                    energiesparen  laengere Akkulaufzeit, CPU drosselt frueh
+                                    ausgewogen     Standard
+                                    leistung       volle CPU-Leistung (lauter, waermer)
+                                  Das Profil gilt sofort und nach jedem Start (veyra-power.service).
+  veyra-power schlafen [--wecken SEKUNDEN] [--art s2idle|deep]
+                                  Ruhezustand; mit --wecken weckt die Echtzeituhr den Rechner
+  veyra-power diagnose            alles fuer einen Fehlerbericht (ohne Seriennummern)
+
+Ruhezustaende: "s2idle" (Standby im Betriebssystem, bei neueren Laptops oft der einzige) und
+"deep" (S3, Suspend-to-RAM). Welcher genommen wird, steht in /sys/power/mem_sleep.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+SYS = os.environ.get("VEYRA_POWER_SYS", "/sys")
+KONF = os.environ.get("VEYRA_POWER_KONF", "/etc/veyra/power.conf")
+PROFILE = ("auto", "energiesparen", "ausgewogen", "leistung")
+# Je Profil: bevorzugte Regler, Energievorgabe (EPP) und Plattform-Profil (Hersteller-Modus,
+# z. B. Luefter), jeweils das erste, das die Hardware anbietet.
+EINSTELLUNG = {
+    "energiesparen": (["powersave", "schedutil"], ["power", "balance_power"], ["low-power", "quiet", "cool"]),
+    "ausgewogen": (["schedutil", "powersave"], ["balance_performance", "default"], ["balanced"]),
+    "leistung": (["performance"], ["performance"], ["performance", "balanced-performance"]),
+}
+
+
+class Fehler(Exception):
+    pass
+
+
+def lies(pfad, standard=""):
+    try:
+        with open(os.path.join(SYS, pfad.lstrip("/")) if not pfad.startswith(SYS) else pfad) as f:
+            return f.read().strip()
+    except OSError:
+        return standard
+
+
+def schreibe(pfad, wert):
+    p = os.path.join(SYS, pfad.lstrip("/")) if not pfad.startswith(SYS) else pfad
+    try:
+        with open(p, "w") as f:
+            f.write(str(wert))
+    except OSError as e:
+        raise Fehler(f"{pfad}: {e.strerror}")
+
+
+def liste(muster_dir, praefix=""):
+    d = os.path.join(SYS, muster_dir.lstrip("/"))
+    return sorted(os.path.join(d, n) for n in os.listdir(d) if n.startswith(praefix)) if os.path.isdir(d) else []
+
+
+def zahl(pfad):
+    w = lies(pfad)
+    return int(w) if re.fullmatch(r"-?\d+", w) else None
+
+
+def versorgung():
+    netz, akkus = [], []
+    for d in liste("/class/power_supply"):
+        typ = lies(os.path.join(d, "type"))
+        name = os.path.basename(d)
+        if typ in ("Mains", "USB") and lies(os.path.join(d, "scope")) != "Device":
+            netz.append({"name": name, "angeschlossen": lies(os.path.join(d, "online")) == "1"})
+        elif typ == "Battery" and lies(os.path.join(d, "scope")) != "Device":
+            # Energie in uWh (energy_*) oder Ladung in uAh (charge_*); beides geht fuer Prozente.
+            e = "energy" if os.path.exists(os.path.join(d, "energy_now")) else "charge"
+            jetzt, voll, neu = (zahl(os.path.join(d, f"{e}_{x}")) for x in ("now", "full", "full_design"))
+            leistung = zahl(os.path.join(d, "power_now" if e == "energy" else "current_now"))
+            status = lies(os.path.join(d, "status"))
+            rest = None
+            if leistung and leistung > 0 and jetzt is not None:
+                if status == "Discharging":
+                    rest = jetzt / leistung * 60
+                elif status == "Charging" and voll:
+                    rest = (voll - jetzt) / leistung * 60
+            akkus.append({
+                "name": name, "ladung": zahl(os.path.join(d, "capacity")),
+                "status": {"Charging": "laedt", "Discharging": "entlaedt", "Full": "voll",
+                           "Not charging": "laedt nicht"}.get(status, status.lower() or "?"),
+                "zustand_prozent": round(voll / neu * 100) if voll and neu else None,
+                "leistung_w": round(leistung / 1e6, 1) if leistung and e == "energy" else None,
+                "restzeit_min": round(rest) if rest else None,
+                "zyklen": zahl(os.path.join(d, "cycle_count")),
+                "modell": " ".join(x for x in (lies(os.path.join(d, "manufacturer")),
+                                               lies(os.path.join(d, "model_name"))) if x) or None})
+    return netz, akkus
+
+
+def cpu():
+    pol = liste("/devices/system/cpu/cpufreq", "policy")
+    regler = sorted({lies(os.path.join(p, "scaling_governor")) for p in pol} - {""})
+    epp = sorted({lies(os.path.join(p, "energy_performance_preference")) for p in pol} - {""})
+    return {"treiber": lies(os.path.join(pol[0], "scaling_driver")) if pol else None,
+            "regler": regler, "regler_moeglich": lies(os.path.join(pol[0], "scaling_available_governors")).split()
+            if pol else [], "epp": epp,
+            "epp_moeglich": lies(os.path.join(pol[0], "energy_performance_available_preferences")).split()
+            if pol else [], "turbo_aus": {"1": True, "0": False}.get(lies("/devices/system/cpu/intel_pstate/no_turbo"))}
+
+
+def plattform():
+    return {"profil": lies("/firmware/acpi/platform_profile") or None,
+            "moeglich": lies("/firmware/acpi/platform_profile_choices").split()}
+
+
+def schlaf():
+    ms = lies("/power/mem_sleep")
+    m = re.search(r"\[(\w+)\]", ms)
+    return {"zustaende": lies("/power/state").split(), "arten": ms.replace("[", "").replace("]", "").split(),
+            "art": m.group(1) if m else None, "erfolgreich": zahl("/power/suspend_stats/success"),
+            "fehlgeschlagen": zahl("/power/suspend_stats/fail")}
+
+
+def gespeichertes_profil():
+    try:
+        for z in open(KONF):
+            m = re.match(r"^\s*profil\s*=\s*(\S+)", z)
+            if m and m.group(1) in PROFILE:
+                return m.group(1)
+    except OSError:
+        pass
+    return "auto"
+
+
+def wirksames_profil(profil, netz):
+    if profil != "auto":
+        return profil
+    am_netz = any(n["angeschlossen"] for n in netz) or not netz
+    return "ausgewogen" if am_netz else "energiesparen"
+
+
+def erste(wunsch, moeglich):
+    return next((w for w in wunsch if w in moeglich), None)
+
+
+def anwenden(profil):
+    """Setzt Regler, EPP und Plattform-Profil; gibt eine Liste der Aenderungen zurueck."""
+    netz, _ = versorgung()
+    wirksam = wirksames_profil(profil, netz)
+    regler_w, epp_w, plat_w = EINSTELLUNG[wirksam]
+    c, p, getan = cpu(), plattform(), []
+    g = erste(regler_w, c["regler_moeglich"])
+    for pol in liste("/devices/system/cpu/cpufreq", "policy"):
+        if g:
+            schreibe(os.path.join(pol, "scaling_governor"), g)
+        e = erste(epp_w, c["epp_moeglich"])
+        if e and g != "performance" and os.path.exists(os.path.join(pol, "energy_performance_preference")):
+            schreibe(os.path.join(pol, "energy_performance_preference"), e)
+    if g:
+        getan.append(f"CPU-Regler {g}")
+    e = erste(epp_w, c["epp_moeglich"])
+    if e and g != "performance":
+        getan.append(f"Energievorgabe {e}")
+    pp = erste(plat_w, p["moeglich"])
+    if pp:
+        schreibe("/firmware/acpi/platform_profile", pp)
+        getan.append(f"Plattform-Profil {pp}")
+    return wirksam, getan
+
+
+def logind():
+    if not shutil.which("systemd-analyze"):
+        return {}
+    r = subprocess.run(["systemd-analyze", "cat-config", "systemd/logind.conf"], text=True, capture_output=True)
+    w = {}
+    for z in r.stdout.splitlines():
+        m = re.match(r"^(HandleLidSwitch|HandleLidSwitchExternalPower|HandleLidSwitchDocked|HandlePowerKey|"
+                     r"IdleAction|IdleActionSec)=(.*)$", z.strip())
+        if m:
+            w[m.group(1)] = m.group(2)
+    return w
+
+
+def erfasse():
+    netz, akkus = versorgung()
+    profil = gespeichertes_profil()
+    return {"netzteil": netz, "akkus": akkus, "profil": profil, "wirksam": wirksames_profil(profil, netz),
+            "cpu": cpu(), "plattform": plattform(), "schlaf": schlaf(), "logind": logind()}
+
+
+def cmd_status(a):
+    h = erfasse()
+    if a.json:
+        print(json.dumps(h, indent=1, ensure_ascii=False))
+        return 0
+    if h["netzteil"]:
+        print(f"Netzteil:      {'angeschlossen' if any(n['angeschlossen'] for n in h['netzteil']) else 'nicht angeschlossen'}")
+    if not h["akkus"]:
+        print("Akku:          keiner (Desktop oder VM)")
+    for x in h["akkus"]:
+        teile = [f"{x['ladung']} %" if x["ladung"] is not None else "?", x["status"]]
+        if x["restzeit_min"]:
+            teile.append(f"noch {x['restzeit_min'] // 60}:{x['restzeit_min'] % 60:02d} h")
+        if x["leistung_w"]:
+            teile.append(f"{x['leistung_w']} W")
+        print(f"Akku {x['name']}:   {', '.join(teile)}")
+        if x["zustand_prozent"] is not None:
+            print(f"  Zustand:     {x['zustand_prozent']} % der urspruenglichen Kapazitaet"
+                  + (f", {x['zyklen']} Ladezyklen" if x["zyklen"] else ""))
+    print(f"Profil:        {h['profil']}" + (f" (jetzt {h['wirksam']})" if h["profil"] == "auto" else ""))
+    c = h["cpu"]
+    if c["treiber"]:
+        print(f"CPU:           {c['treiber']}, Regler {', '.join(c['regler']) or '?'}"
+              + (f", Energievorgabe {', '.join(c['epp'])}" if c["epp"] else "")
+              + (", Turbo aus" if c["turbo_aus"] else ""))
+    else:
+        print("CPU:           keine Taktsteuerung (VM oder Treiber fehlt)")
+    if h["plattform"]["profil"]:
+        print(f"Plattform:     {h['plattform']['profil']} (moeglich: {', '.join(h['plattform']['moeglich'])})")
+    s = h["schlaf"]
+    print(f"Ruhezustand:   {s['art'] or 'nicht verfuegbar'}"
+          + (f" (moeglich: {', '.join(s['arten'])})" if s["arten"] else "")
+          + (f", bisher {s['erfolgreich']} erfolgreich" if s["erfolgreich"] else "")
+          + (f", {s['fehlgeschlagen']} fehlgeschlagen" if s["fehlgeschlagen"] else ""))
+    if h["logind"]:
+        print(f"Deckel:        {h['logind'].get('HandleLidSwitch', 'suspend')}, Einschalttaste: "
+              f"{h['logind'].get('HandlePowerKey', 'poweroff')}")
+    return 0
+
+
+def cmd_profil(a):
+    if not a.name:
+        p = gespeichertes_profil()
+        netz, _ = versorgung()
+        print(p + (f" (jetzt {wirksames_profil(p, netz)})" if p == "auto" else ""))
+        return 0
+    if os.geteuid() != 0 and not os.environ.get("VEYRA_POWER_SYS"):
+        raise Fehler("Profil setzen braucht root")
+    os.makedirs(os.path.dirname(KONF), exist_ok=True)
+    with open(KONF + ".neu", "w") as f:
+        f.write(f"# veyra-power: Energieprofil ({', '.join(PROFILE)})\nprofil={a.name}\n")
+    os.replace(KONF + ".neu", KONF)
+    wirksam, getan = anwenden(a.name)
+    print(f"Profil {a.name}" + (f" (jetzt {wirksam})" if a.name == "auto" else "")
+          + (f": {', '.join(getan)}" if getan else ": nichts einstellbar (keine Taktsteuerung)"))
+    return 0
+
+
+def cmd_anwenden(_a):
+    wirksam, getan = anwenden(gespeichertes_profil())
+    print(f"veyra-power: {wirksam}" + (f": {', '.join(getan)}" if getan else ""))
+    return 0
+
+
+def cmd_schlafen(a):
+    s = schlaf()
+    if "mem" not in s["zustaende"] and "freeze" not in s["zustaende"]:
+        raise Fehler("kein Ruhezustand verfuegbar (/sys/power/state)")
+    if a.art:
+        if a.art not in s["arten"]:
+            raise Fehler(f"{a.art} gibt es hier nicht (moeglich: {', '.join(s['arten']) or 'keiner'})")
+        schreibe("/power/mem_sleep", a.art)
+    art = a.art or s["art"]
+    vorher = s["erfolgreich"] or 0
+    if a.wecken:
+        rtc = "/class/rtc/rtc0/wakealarm"
+        if not os.path.exists(os.path.join(SYS, rtc.lstrip("/"))):
+            raise Fehler("keine Echtzeituhr mit Weckfunktion (rtc0)")
+        schreibe(rtc, 0)
+        schreibe(rtc, f"+{a.wecken}")
+    start = time.monotonic()
+    r = subprocess.run(["systemctl", "suspend"], text=True, capture_output=True)
+    if r.returncode != 0:
+        raise Fehler(f"systemctl suspend: {r.stderr.strip()}")
+    # systemctl kehrt zurueck, bevor der Rechner schlaeft; fertig ist es, wenn der Zaehler
+    # erfolgreicher Ruhezustaende steigt.
+    grenze = (a.wecken or 0) + 90
+    while (zahl("/power/suspend_stats/success") or 0) <= vorher:
+        if time.monotonic() - start > grenze:
+            fehl = zahl("/power/suspend_stats/fail")
+            raise Fehler(f"kein erfolgreicher Ruhezustand nach {grenze} s (fehlgeschlagen: {fehl})")
+        time.sleep(0.5)
+    print(f"Wieder wach: Ruhezustand {art}, {time.monotonic() - start:.0f} s seit dem Befehl")
+    return 0
+
+
+def ohne_serien(text):
+    return re.sub(r"(?im)^(\s*POWER_SUPPLY_SERIAL_NUMBER=|.*serial_number:\s*).*$", r"\1<entfernt>", text)
+
+
+def cmd_diagnose(_a):
+    teile = [("Status", lambda: json.dumps(erfasse(), indent=1, ensure_ascii=False))]
+    for titel, cmd in (("veyra-power.service", ["systemctl", "status", "--no-pager", "veyra-power.service"]),
+                       ("Kernel: Ruhezustand und ACPI", ["journalctl", "-k", "-b", "--no-pager", "-g",
+                                                         "PM: |ACPI: (battery|AC)|suspend|resume"]),
+                       ("Letzte Ruhezustaende", ["journalctl", "-b", "--no-pager", "-u", "systemd-suspend.service"])):
+        def f(cmd=cmd):
+            if not shutil.which(cmd[0]):
+                return "(Programm fehlt)"
+            r = subprocess.run(cmd, text=True, capture_output=True)
+            return (r.stdout + r.stderr).strip()[-6000:] or "(leer)"
+        teile.append((titel, f))
+    for titel, f in teile:
+        print(f"===== {titel}")
+        try:
+            print(ohne_serien(f()))
+        except (OSError, ValueError, Fehler) as e:
+            print(f"(nicht lesbar: {e})")
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="veyra-power", description=__doc__.split("\n")[0],
+                                 epilog="\n".join(__doc__.split("\n")[2:]),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="befehl")
+    p = sub.add_parser("status")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("profil")
+    p.add_argument("name", nargs="?", choices=PROFILE)
+    sub.add_parser("anwenden")
+    p = sub.add_parser("schlafen")
+    p.add_argument("--wecken", type=int, metavar="SEKUNDEN")
+    p.add_argument("--art", choices=("s2idle", "deep", "shallow"))
+    sub.add_parser("diagnose")
+    a = ap.parse_args(argv)
+    if a.befehl is None:
+        a.json = False
+    try:
+        return {None: cmd_status, "status": cmd_status, "profil": cmd_profil, "anwenden": cmd_anwenden,
+                "schlafen": cmd_schlafen, "diagnose": cmd_diagnose}[a.befehl](a)
+    except Fehler as e:
+        print(f"veyra-power: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
