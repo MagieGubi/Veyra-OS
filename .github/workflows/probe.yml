@@ -1,6 +1,6 @@
-# Holt Referenzdaten fuer neue Quellen (Versionen, Pruefsummen, Signierer) und Ergebnisse,
-# die aus der Entwicklungsumgebung nicht erreichbar sind. Laeuft nur, wenn sich diese Datei
-# aendert, oder per Knopfdruck. Aendert nichts im Repository.
+# Holt Referenzdaten fuer neue Quellen (Versionen, Pruefsummen, Optionen), die aus der
+# Entwicklungsumgebung nicht erreichbar sind. Laeuft nur, wenn sich diese Datei aendert,
+# oder per Knopfdruck. Aendert nichts im Repository.
 name: Quellen-Erkundung
 
 on:
@@ -11,20 +11,44 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  bildschirmfoto:
+  connectivity:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - name: Bildschirmfoto des Desktop-Tests als Text ausgeben
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Kernel 6.18.56 Kconfig (Ton, Bluetooth)
         run: |
           set +e -u
           cd "$(mktemp -d)"
-          gh run download 44721414747 -R "$GITHUB_REPOSITORY" -n veyra-desktop-test
-          ls -la
-          ls -la desktop-logs; sha256sum desktop-logs/veyra-desktop.png
-          echo "BEGIN-PNG"; base64 -w 0 desktop-logs/veyra-desktop.png; echo; echo "END-PNG"
+          curl -fsSL https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.56.tar.xz | tar -xJ --wildcards 'linux-6.18.56/sound/hda/*Kconfig' 'linux-6.18.56/sound/pci/hda/Kconfig' 'linux-6.18.56/sound/soc/sof/intel/Kconfig' 'linux-6.18.56/drivers/bluetooth/Kconfig' 'linux-6.18.56/sound/usb/Kconfig' 'linux-6.18.56/arch/x86/configs/x86_64_defconfig' 2>/dev/null
+          find linux-6.18.56 -name Kconfig | sort
+          grep -h "^config \|^menuconfig " $(find linux-6.18.56/sound -name Kconfig) | sort | tr '\n' ' '; echo
+          grep -h "^config " linux-6.18.56/drivers/bluetooth/Kconfig | tr '\n' ' '; echo
+          grep -E "SND|SOUND|BT|INPUT" linux-6.18.56/arch/x86/configs/x86_64_defconfig
+      - name: Meson-Optionen und Mindestversionen
+        run: |
+          set +e -u
+          cd "$(mktemp -d)"
+          curl -fsSL https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz | tar -xJ
+          curl -fsSL https://download.gnome.org/sources/glib/2.90/glib-2.90.1.sha256sum
+          grep -n "meson_version\|version :" glib-2.90.1/meson.build | head -3
+          grep -n "dependency('libpcre2\|pcre2_req\|dependency('libffi\|dependency('zlib" glib-2.90.1/meson.build glib-2.90.1/*/meson.build | head
+          grep -E "^option\(" glib-2.90.1/meson_options.txt glib-2.90.1/meson.options 2>/dev/null | cut -c1-150
+          curl -fsSL https://gitlab.freedesktop.org/pipewire/pipewire/-/archive/1.6.6/pipewire-1.6.6.tar.bz2 -o pw.tar.bz2 && sha256sum pw.tar.bz2 && tar -xjf pw.tar.bz2
+          grep -n "meson_version" pipewire-1.6.6/meson.build | head -2
+          grep -oE "^option\('[a-z0-9_-]+'" pipewire-1.6.6/meson_options.txt | cut -d"'" -f2 | tr '\n' ' '; echo
+          grep -n "dependency(" pipewire-1.6.6/meson.build | cut -c1-150 | head -60
+          curl -fsSL https://gitlab.freedesktop.org/pipewire/wireplumber/-/archive/0.5.14/wireplumber-0.5.14.tar.bz2 -o wp.tar.bz2 && sha256sum wp.tar.bz2 && tar -xjf wp.tar.bz2
+          grep -n "meson_version\|dependency(" wireplumber-0.5.14/meson.build | cut -c1-150
+          cat wireplumber-0.5.14/meson_options.txt | grep -E "^option" | cut -c1-150
+      - name: alsa, bluez, lua, Signaturen
+        run: |
+          set +e -u
+          cd "$(mktemp -d)"
+          for u in https://www.alsa-project.org/files/pub/lib/alsa-lib-1.2.16.1.tar.bz2 https://www.alsa-project.org/files/pub/utils/alsa-utils-1.2.16.tar.bz2 https://www.lua.org/ftp/lua-5.4.9.tar.gz https://www.kernel.org/pub/linux/bluetooth/bluez-5.87.tar.xz https://www.kernel.org/pub/linux/bluetooth/sbc-2.1.tar.xz https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.49/pcre2-10.49.tar.bz2 https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz; do
+            curl -fsSL -o "${u##*/}" "$u" && sha256sum "${u##*/}"
+            for s in .sig .asc .sign; do curl -fsI "${u%.*}$s" >/dev/null 2>&1 && echo "  Signatur: ${u%.*}$s"; curl -fsI "$u$s" >/dev/null 2>&1 && echo "  Signatur: $u$s"; done
+          done
+          tar -xJf bluez-5.87.tar.xz && ./bluez-5.87/configure --help | grep -E "^\s+--(enable|disable)-" | cut -c1-90
+          tar -xjf alsa-utils-1.2.16.tar.bz2 && ./alsa-utils-1.2.16/configure --help | grep -E "^\s+--(enable|disable|with)-" | cut -c1-90
