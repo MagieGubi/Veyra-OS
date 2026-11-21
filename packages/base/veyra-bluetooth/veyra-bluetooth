@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""veyra-bluetooth: Bluetooth-Geraete suchen, koppeln und verbinden (Veyra 0.7).
+
+  veyra-bluetooth [status]            Dienst, Controller (eingeschaltet, sichtbar), Funksperre
+  veyra-bluetooth an | aus            Controller ein- oder ausschalten
+  veyra-bluetooth suche [--sekunden N]   Geraete in der Naehe suchen (Standard 10 s)
+  veyra-bluetooth geraete [--json]    bekannte Geraete: gekoppelt, verbunden, vertraut
+  veyra-bluetooth koppeln ADRESSE     sicher koppeln; bei Bedarf fragt bluetoothctl nach dem
+                                      Bestaetigen des angezeigten Codes oder einer PIN
+  veyra-bluetooth verbinde ADRESSE | trenne ADRESSE | entferne ADRESSE
+  veyra-bluetooth diagnose            alles fuer einen Fehlerbericht, ohne Geraeteadressen
+
+Gekoppelte Geraete werden als vertraut markiert und verbinden sich danach von selbst
+(Kopfhoerer, Tastaturen, Maeuse, Controller). Bluetooth-Ton laeuft ueber PipeWire
+(veyra-audio). Gearbeitet wird mit dem Standard-Controller von BlueZ.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+SYS = os.environ.get("VEYRA_BLUETOOTH_SYS", "/sys")
+ADR_RE = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+MAC_RE = re.compile(r"\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x01|\x02")
+
+
+class Fehler(Exception):
+    pass
+
+
+def ctl(*args, pruefen=True, zeit=30, eingabe=None):
+    """bluetoothctl nicht interaktiv; Ausgabe ohne Farben."""
+    if not shutil.which("bluetoothctl"):
+        raise Fehler("bluetoothctl fehlt (vpkg install veyra-bluetooth)")
+    try:
+        r = subprocess.run(["bluetoothctl", *args], text=True, capture_output=True, timeout=zeit + 15,
+                           input=eingabe)
+    except subprocess.TimeoutExpired:
+        raise Fehler(f"bluetoothctl {' '.join(args)}: keine Antwort")
+    out = ANSI_RE.sub("", r.stdout)
+    if pruefen and r.returncode != 0:
+        raise Fehler(f"bluetoothctl {' '.join(args)}: {(ANSI_RE.sub('', r.stderr) or out).strip() or 'Fehler'}")
+    return out
+
+
+def adresse(a):
+    if not ADR_RE.match(a or ""):
+        raise Fehler(f"{a!r} ist keine Bluetooth-Adresse (Form AA:BB:CC:DD:EE:FF, siehe 'veyra-bluetooth suche')")
+    return a.upper()
+
+
+def dienst_aktiv():
+    if not shutil.which("systemctl"):
+        return False
+    r = subprocess.run(["systemctl", "is-active", "bluetooth.service"], text=True, capture_output=True)
+    return r.stdout.strip() == "active"
+
+
+def funksperre():
+    out = []
+    d = os.path.join(SYS, "class/rfkill")
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        p = os.path.join(d, n)
+        try:
+            typ = open(os.path.join(p, "type")).read().strip()
+            if typ != "bluetooth":
+                continue
+            soft = open(os.path.join(p, "soft")).read().strip() == "1"
+            hard = open(os.path.join(p, "hard")).read().strip() == "1"
+        except OSError:
+            continue
+        if soft or hard:
+            out.append(f"{n} ({'Hardware-Schalter' if hard else 'per Software'})")
+    return out
+
+
+def felder(text):
+    """'Schluessel: Wert'-Zeilen aus bluetoothctl show/info."""
+    f = {}
+    for z in text.splitlines():
+        m = re.match(r"^\s+([A-Za-z]+):\s*(.*)$", z)
+        if m and m.group(1) not in f:
+            f[m.group(1)] = m.group(2).strip()
+    return f
+
+
+def controller():
+    out = []
+    for z in ctl("list").splitlines():
+        m = re.match(r"^Controller ((?:[0-9A-F]{2}:){5}[0-9A-F]{2}) (.*?)( \[default\])?$", z.strip())
+        if m:
+            f = felder(ctl("show", m.group(1)))
+            out.append({"adresse": m.group(1), "name": m.group(2), "standard": bool(m.group(3)),
+                        "an": f.get("Powered") == "yes", "sichtbar": f.get("Discoverable") == "yes"})
+    return out
+
+
+def pruefe_controller():
+    if not controller():
+        raise Fehler("kein Bluetooth-Controller (veyra-hwinfo zeigt, ob ein Chip ohne Treiber oder "
+                     "Firmware da ist; Funksperre: 'veyra-bluetooth status')")
+
+
+def geraete():
+    out = []
+    for z in ctl("devices").splitlines():
+        m = re.match(r"^Device ((?:[0-9A-F]{2}:){5}[0-9A-F]{2}) (.*)$", z.strip())
+        if not m:
+            continue
+        f = felder(ctl("info", m.group(1), pruefen=False))
+        out.append({"adresse": m.group(1), "name": f.get("Name") or f.get("Alias") or m.group(2),
+                    "art": f.get("Icon", ""), "gekoppelt": f.get("Paired") == "yes",
+                    "verbunden": f.get("Connected") == "yes", "vertraut": f.get("Trusted") == "yes"})
+    return out
+
+
+def cmd_status(_a):
+    print(f"Dienst bluetooth: {'laeuft' if dienst_aktiv() else 'laeuft nicht (systemctl enable --now bluetooth)'}")
+    sperre = funksperre()
+    if sperre:
+        print(f"Funksperre: {', '.join(sperre)} (rfkill unblock bluetooth, oder Taste/Schalter)")
+    if not dienst_aktiv():
+        return 1
+    cs = controller()
+    if not cs:
+        print("Kein Bluetooth-Controller.")
+        return 1
+    for c in cs:
+        print(f"Controller {c['name']}{' (Standard)' if c['standard'] else ''}: "
+              f"{'an' if c['an'] else 'aus'}{', sichtbar' if c['sichtbar'] else ''}")
+    g = geraete()
+    print(f"Geraete: {sum(x['gekoppelt'] for x in g)} gekoppelt, {sum(x['verbunden'] for x in g)} verbunden")
+    return 0
+
+
+def cmd_an_aus(a):
+    pruefe_controller()
+    ctl("power", "on" if a.befehl == "an" else "off")
+    print(f"Bluetooth {'eingeschaltet' if a.befehl == 'an' else 'ausgeschaltet'}.")
+    return 0
+
+
+def cmd_suche(a):
+    pruefe_controller()
+    ctl("power", "on")
+    ctl("--timeout", str(a.sekunden), "scan", "on", pruefen=False, zeit=a.sekunden)
+    g = [x for x in geraete() if not x["gekoppelt"]]
+    if not g:
+        print("Nichts gefunden. Ist das Geraet im Kopplungsmodus?")
+        return 1
+    for x in g:
+        print(f"{x['adresse']}  {x['name']}{'  (' + x['art'] + ')' if x['art'] else ''}")
+    return 0
+
+
+def cmd_geraete(a):
+    g = geraete()
+    if a.json:
+        print(json.dumps(g, indent=1, ensure_ascii=False))
+        return 0
+    if not g:
+        print("Keine bekannten Geraete ('veyra-bluetooth suche').")
+        return 1
+    for x in g:
+        zustand = ", ".join(n for n, k in (("gekoppelt", "gekoppelt"), ("verbunden", "verbunden"),
+                                             ("vertraut", "vertraut")) if x[k]) or "nur gesehen"
+        print(f"{x['adresse']}  {x['name']:<28} {zustand}")
+    return 0
+
+
+def cmd_koppeln(a):
+    adr = adresse(a.adresse)
+    pruefe_controller()
+    # Mit Terminal: KeyboardDisplay, damit bluetoothctl den Code zum Vergleichen zeigt oder eine
+    # PIN abfragt (Secure Simple Pairing). Ohne Terminal nur "Just Works" (NoInputNoOutput).
+    agent = "NoInputNoOutput" if a.ohne_rueckfrage else "KeyboardDisplay"
+    r = subprocess.run(["bluetoothctl", "--agent", agent, "--timeout", "30", "pair", adr],
+                       stdin=subprocess.DEVNULL if a.ohne_rueckfrage else None)
+    info = felder(ctl("info", adr, pruefen=False))
+    if r.returncode != 0 and info.get("Paired") != "yes":
+        raise Fehler(f"Koppeln mit {adr} gescheitert")
+    ctl("trust", adr)
+    ctl("connect", adr, pruefen=False)
+    info = felder(ctl("info", adr, pruefen=False))
+    if info.get("Paired") != "yes":
+        raise Fehler(f"{adr} ist nicht gekoppelt")
+    print(f"Gekoppelt und vertraut: {info.get('Name', adr)}"
+          f"{', verbunden' if info.get('Connected') == 'yes' else ''}")
+    return 0
+
+
+def cmd_einfach(a):
+    adr = adresse(a.adresse)
+    befehl = {"verbinde": "connect", "trenne": "disconnect", "entferne": "remove"}[a.befehl]
+    out = ctl(befehl, adr, pruefen=False)
+    if not re.search(r"successful|Successful|removed|Device has been removed", out):
+        raise Fehler(f"{a.befehl} {adr}: {out.strip().splitlines()[-1] if out.strip() else 'Fehler'}")
+    print({"verbinde": "Verbunden", "trenne": "Getrennt", "entferne": "Entfernt"}[a.befehl] + f": {adr}")
+    return 0
+
+
+def ohne_adressen(text):
+    return MAC_RE.sub("xx:xx:xx:xx:xx:xx", text)
+
+
+def cmd_diagnose(_a):
+    teile = [("Dienst", lambda: "laeuft" if dienst_aktiv() else "laeuft nicht"),
+             ("Funksperre", lambda: ", ".join(funksperre()) or "keine"),
+             ("Controller", lambda: json.dumps(controller(), indent=1, ensure_ascii=False)),
+             ("Geraete", lambda: json.dumps(geraete(), indent=1, ensure_ascii=False))]
+    for titel, cmd in (("bluetooth.service", ["systemctl", "status", "--no-pager", "bluetooth.service"]),
+                       ("Kernel: Bluetooth und Firmware", ["journalctl", "-k", "-b", "--no-pager", "-g",
+                                                          "Bluetooth|btusb|btintel|hci|firmware"])):
+        def f(cmd=cmd):
+            if not shutil.which(cmd[0]):
+                return "(Programm fehlt)"
+            r = subprocess.run(cmd, text=True, capture_output=True)
+            return (r.stdout + r.stderr).strip() or "(leer)"
+        teile.append((titel, f))
+    for titel, f in teile:
+        print(f"===== {titel}")
+        try:
+            print(ohne_adressen(f()))
+        except (OSError, ValueError, Fehler) as e:
+            print(f"(nicht lesbar: {e})")
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="veyra-bluetooth", description=__doc__.split("\n")[0],
+                                 epilog="\n".join(__doc__.split("\n")[2:]),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="befehl")
+    sub.add_parser("status")
+    sub.add_parser("an")
+    sub.add_parser("aus")
+    p = sub.add_parser("suche")
+    p.add_argument("--sekunden", type=int, default=10, choices=range(1, 121), metavar="1..120")
+    p = sub.add_parser("geraete")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("koppeln")
+    p.add_argument("adresse")
+    p.add_argument("--ohne-rueckfrage", action="store_true",
+                   help="ohne Terminal (Skripte, Tests): nur fuer Geraete ohne Anzeige und Tastatur")
+    for n in ("verbinde", "trenne", "entferne"):
+        sub.add_parser(n).add_argument("adresse")
+    sub.add_parser("diagnose")
+    a = ap.parse_args(argv)
+    try:
+        return {None: cmd_status, "status": cmd_status, "an": cmd_an_aus, "aus": cmd_an_aus,
+                "suche": cmd_suche, "geraete": cmd_geraete, "koppeln": cmd_koppeln,
+                "verbinde": cmd_einfach, "trenne": cmd_einfach, "entferne": cmd_einfach,
+                "diagnose": cmd_diagnose}[a.befehl](a)
+    except Fehler as e:
+        print(f"veyra-bluetooth: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

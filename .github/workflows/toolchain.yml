@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh tests/audio/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh tests/audio/*.sh tests/bluetooth/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -33,7 +33,7 @@ jobs:
       - name: Firewall-Regeln testen
         run: sudo apt-get install -y nftables && sudo bash tests/firewall/firewall-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
-        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh && bash tests/recovery/recovery-test.sh && bash tests/hwinfo/hwinfo-test.sh && bash tests/network/network-test.sh && bash tests/audio/audio-test.sh
+        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh && bash tests/recovery/recovery-test.sh && bash tests/hwinfo/hwinfo-test.sh && bash tests/network/network-test.sh && bash tests/audio/audio-test.sh && bash tests/bluetooth/bluetooth-test.sh
       - name: Konten testen (Ersteinrichtung, Kontenpruefung)
         run: sudo bash tests/konten/konten-test.sh
       - name: Abbild-Varianten testen (dev und test, mit Probe-System)
@@ -1025,7 +1025,7 @@ jobs:
           retention-days: 7
 
   audio:
-    name: Ton in QEMU (PipeWire, HD-Audio, Messung der Ausgabe)
+    name: Ton und Bluetooth in QEMU (PipeWire, HD-Audio, BlueZ mit virtuellen Controllern)
     needs: [image, stage6]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -1051,10 +1051,12 @@ jobs:
           name: pakete-6
           path: connect
 
-      - name: veyra-audio bauen, Repository-Index
+      - name: veyra-audio und veyra-bluetooth bauen, Repository-Index
         run: |
           rm -f connect/SHA256SUMS
-          build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir connect packages/base/veyra-audio
+          for p in veyra-audio veyra-bluetooth; do
+            build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir connect "packages/base/$p"
+          done
           python3 packages/base/vpkg/vpkg index --stand "$(git log -1 --format=%ct)" connect
 
       - name: Pakete signieren (wenn das Secret VPKG_SIGNING_KEY eingerichtet ist)
@@ -1071,8 +1073,8 @@ jobs:
           build/scripts/sign-packages.sh "$key" connect
           rm -f "$key"
 
-      # Wie "vpkg install @veyra-audio" auf einem fertigen System (nur virtuelle Platte).
-      - name: veyra-audio ins Abbild installieren
+      # Wie "vpkg install @veyra-audio @veyra-bluetooth" auf einem fertigen System (nur virtuelle Platte).
+      - name: veyra-audio und veyra-bluetooth ins Abbild installieren
         run: |
           set -o pipefail
           zstd -q -d --rm img/veyra-0.6.img.zst -o veyra-audio.img
@@ -1083,7 +1085,7 @@ jobs:
           loop=$(sudo losetup --find --show --offset "$start" --sizelimit "$size" veyra-audio.img)
           sudo mkdir -p /mnt/veyra
           sudo mount "$loop" /mnt/veyra
-          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install --repo "$PWD/connect" veyra-audio | tee vpkg-install.log
+          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install --repo "$PWD/connect" veyra-audio veyra-bluetooth | tee vpkg-install.log
           if sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra list | grep -qE '^lua '; then
             echo "Bauwerkzeug lua gehoert nicht ins System" >&2; exit 1
           fi
@@ -1094,12 +1096,17 @@ jobs:
       - name: Ton-Test (Wiedergabe als WAV gemessen, Aufnahmeweg, Benutzerrechte)
         run: python3 image/audio-test.py veyra-audio.img audio-logs
 
+      - name: Bluetooth-Test (btvirt ueber hci_vhci, suchen, koppeln, verbinden, Rechte)
+        if: success() || failure()
+        run: python3 image/bluetooth-test.py veyra-audio.img bluetooth-logs
+
       - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: veyra-audio-test
           path: |
             audio-logs
+            bluetooth-logs
             vpkg-install.log
           retention-days: 7
           if-no-files-found: ignore
