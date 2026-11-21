@@ -773,7 +773,7 @@ jobs:
           build/scripts/vpkg-build --srcdir "$PWD" --outdir extra/selftest packages/test/vpkg-demo
           # Hardwareabhaengig (Firmware): nicht im VM-Abbild, aber im Repository und im
           # Testabbild fuer echte Rechner (build-image.sh liest nur extra/ selbst).
-          for r in packages/base/veyra-firmware-*; do
+          for r in packages/base/veyra-firmware packages/base/veyra-firmware-*; do
             build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir extra/hardware "$r"
           done
 
@@ -1056,7 +1056,7 @@ jobs:
       - name: veyra-audio, veyra-bluetooth und veyra-power bauen, Repository-Index
         run: |
           rm -f connect/SHA256SUMS
-          for p in veyra-audio veyra-bluetooth veyra-power; do
+          for p in veyra-audio veyra-bluetooth veyra-power veyra-laptop; do
             build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir connect "packages/base/$p"
           done
           python3 packages/base/vpkg/vpkg index --stand "$(git log -1 --format=%ct)" connect
