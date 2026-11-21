@@ -108,9 +108,9 @@ def main():
                   r"Standard-ausgabe: [^\r\n]*\(ID \d+\)[\s\S]*Standard-eingabe: [^\r\n]*\(ID \d+\)"
                   r"[\s\S]*\*\s+\d+\s+ausgabe[\s\S]*G-6", 60)
         ok("WirePlumber meldet Standard-Ausgabe und -Eingabe")
-        vm.befehl("useradd -m -G pipewire tontest && su - tontest -c 'veyra-audio geraete' | grep -c '^\\*'; "
+        vm.befehl("useradd -m -G pipewire tontest && su - tontest -c 'veyra-audio geraete' | grep -c '^\\*' | sed 's/^/SICHTBAR=/'; "
                   "useradd -m ohneton && su - ohneton -c 'veyra-audio geraete' 2>&1 | tail -1; echo U-$((4+4))",
-                  r"\r?\n2\s*\r?\n[\s\S]*veyra-audio: kein PipeWire[^\r\n]*[\s\S]*U-8", 60)
+                  r"SICHTBAR=2\s*\r?\n[\s\S]*veyra-audio: kein PipeWire[^\r\n]*[\s\S]*U-8", 60)
         ok("Benutzer der Gruppe pipewire sieht die Geraete, andere nicht")
         vm.befehl("veyra-audio lautstaerke 80 && veyra-audio stumm aus && "
                   "su - tontest -c 'veyra-audio test --sekunden 3'; echo T-$?",
