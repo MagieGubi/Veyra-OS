@@ -5,7 +5,8 @@ license=MIT
 url=https://pipewire.org/
 sources=(https://gitlab.freedesktop.org/pipewire/pipewire/-/archive/1.6.6/pipewire-1.6.6.tar.bz2)
 sha256sums=()
-depends=(glibc dbus systemd alsa-lib libsndfile sbc readline)
+# bluez: das Bluetooth-Modul braucht libbluetooth (bluez.pc) zum Bauen und Laufen
+depends=(glibc dbus systemd alsa-lib libsndfile sbc bluez readline)
 makedepends=(meson ninja python)
 
 build() {

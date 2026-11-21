@@ -8,6 +8,6 @@ alsa-lib
 alsa-utils
 libsndfile
 sbc
+bluez
 pipewire
 wireplumber
-bluez
