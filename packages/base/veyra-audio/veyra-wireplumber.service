@@ -17,6 +17,7 @@ Restart=on-failure
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
+ReadWritePaths=/run/pipewire
 PrivateTmp=yes
 
 [Install]

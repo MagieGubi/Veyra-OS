@@ -94,6 +94,8 @@ def main():
         dt.anmelden_root(vm)
         vm.befehl("cat /proc/asound/cards; echo K-$((1+1))", r"\[[^\]]*\]: [\s\S]*K-2", 30)
         ok("Kernel erkennt die HD-Audio-Karte")
+        vm.befehl("sleep 5; journalctl -b --no-pager -u veyra-pipewire -u veyra-wireplumber "
+                  "-u veyra-pipewire-pulse | tail -40; echo J-$((1+2))", r"J-3", 60)
         vm.befehl("for i in $(seq 30); do systemctl is-active --quiet veyra-pipewire veyra-wireplumber "
                   "veyra-pipewire-pulse && break; sleep 1; done; "
                   "systemctl is-active veyra-pipewire veyra-wireplumber veyra-pipewire-pulse; echo D-$((2+2))",
