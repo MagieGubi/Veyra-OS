@@ -8,8 +8,8 @@ Ablauf:
   Start 1: Test-Zugangspunkt einrichten (fester Treiber-Start beim Booten, iwd laesst das
            Funkgeraet des Zugangspunkts in Ruhe), Neustart, damit die Namen fest sind
   Start 2: WPA2-Personal verbinden: Passwort nur ueber stdin, IPv4 per DHCP, IPv6 per SLAAC;
-           hostapd bestaetigt die Schluesselverwaltung (AKM 00-0f-ac:2 = PSK).
-           Dann WPA3-Personal (SAE, AKM 00-0f-ac:8, Management-Frame-Schutz Pflicht).
+           hostapd bestaetigt die Schluesselverwaltung (AKM 00-0f-ac-2 = PSK).
+           Dann WPA3-Personal (SAE, AKM 00-0f-ac-8, Management-Frame-Schutz Pflicht).
   Start 3: ohne jeden Befehl verbindet iwd wieder mit dem bekannten WPA3-Netz (Autoconnect)
 
 Datenverkehr zwischen zwei Schnittstellen eines Rechners geht nicht ueber Funk; Nachweis der
@@ -152,7 +152,7 @@ def main():
                   "veyra-network wlan status; echo S-$((5+5))",
                   r"Sicherheit: WPA2-Personal[\s\S]*Adressen:[^\r\n]*10\.77\.0\.\d+/24[^\r\n]*fd77:0:0:1:[\s\S]*S-10", 60)
         vm.befehl("hostapd_cli -p /run/hostapd all_sta | grep -i AKMSuiteSelector; echo K-$((5+6))",
-                  r"AKMSuiteSelector=000fac-2[\s\S]*K-11", 30)
+                  r"AKMSuiteSelector=00-0f-ac-2[\s\S]*K-11", 30)
         ok("WPA2-Personal: verbunden, IPv4 per DHCP, IPv6 per SLAAC, AKM PSK")
         vm.befehl("[ \"$(stat -c %a /var/lib/iwd/veyra-test-wpa2.psk)\" = 600 ] && echo RECHTE-OK; "
                   "veyra-network diagnose | grep -c 'veyra-test-passwort' | sed 's/^/IM-BERICHT=/'; echo R-$((6+6))",
@@ -165,7 +165,7 @@ def main():
                   "echo W-$?", r"Verbunden mit veyra-test-wpa3 \(WPA3-Personal\)[\s\S]*W-0", 120)
         vm.befehl("for i in $(seq 30); do ip -4 addr show wlan0 | grep -q 'inet 10\\.77\\.0\\.' && break; sleep 1; done; "
                   "hostapd_cli -p /run/hostapd all_sta | grep -i AKMSuiteSelector; veyra-network wlan status; "
-                  "echo X-$((7+7))", r"AKMSuiteSelector=000fac-8[\s\S]*Sicherheit: WPA3-Personal[\s\S]*"
+                  "echo X-$((7+7))", r"AKMSuiteSelector=00-0f-ac-8[\s\S]*Sicherheit: WPA3-Personal[\s\S]*"
                   r"Adressen:[^\r\n]*10\.77\.0\.\d+/24[\s\S]*X-14", 60)
         ok("WPA3-Personal (SAE): verbunden, AKM SAE, Adresse per DHCP")
         vm.sende("poweroff\r")
