@@ -1025,7 +1025,7 @@ jobs:
           retention-days: 7
 
   audio:
-    name: Ton und Bluetooth in QEMU (PipeWire, HD-Audio, BlueZ mit virtuellen Controllern)
+    name: Ton, Bluetooth und WLAN in QEMU (PipeWire, BlueZ, iwd mit WPA2/WPA3)
     needs: [image, stage6]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -1073,7 +1073,8 @@ jobs:
           build/scripts/sign-packages.sh "$key" connect
           rm -f "$key"
 
-      # Wie "vpkg install @veyra-audio @veyra-bluetooth" auf einem fertigen System (nur virtuelle Platte).
+      # Wie "vpkg install @veyra-audio @veyra-bluetooth" auf einem fertigen System (nur virtuelle
+      # Platte); hostapd nur fuer den Test-Zugangspunkt im WLAN-Test.
       - name: veyra-audio und veyra-bluetooth ins Abbild installieren
         run: |
           set -o pipefail
@@ -1085,7 +1086,7 @@ jobs:
           loop=$(sudo losetup --find --show --offset "$start" --sizelimit "$size" veyra-audio.img)
           sudo mkdir -p /mnt/veyra
           sudo mount "$loop" /mnt/veyra
-          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install --repo "$PWD/connect" veyra-audio veyra-bluetooth | tee vpkg-install.log
+          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install --repo "$PWD/connect" veyra-audio veyra-bluetooth hostapd | tee vpkg-install.log
           if sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra list | grep -qE '^lua '; then
             echo "Bauwerkzeug lua gehoert nicht ins System" >&2; exit 1
           fi
@@ -1100,6 +1101,11 @@ jobs:
         if: success() || failure()
         run: python3 image/bluetooth-test.py veyra-audio.img bluetooth-logs
 
+      # Zuletzt: richtet auf der Platte einen Test-Zugangspunkt ein (bleibt dort).
+      - name: WLAN-Test (mac80211_hwsim, hostapd, WPA2, WPA3-SAE, DHCP, IPv6, Autoconnect)
+        if: success() || failure()
+        run: python3 image/wlan-test.py veyra-audio.img wlan-logs
+
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -1107,6 +1113,7 @@ jobs:
           path: |
             audio-logs
             bluetooth-logs
+            wlan-logs
             vpkg-install.log
           retention-days: 7
           if-no-files-found: ignore

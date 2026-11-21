@@ -11,3 +11,5 @@ sbc
 bluez
 pipewire
 wireplumber
+libnl
+hostapd

@@ -3,7 +3,9 @@
 # Zweite, unabhaengige Pruefsumme jeweils aus den Hash-Dateien von Buildroot (gitlab.com,
 # Zweig master, 21.11.2026); der Download im CI (Quellen-Erkundung, Lauf 44949727121) ergab
 # genau dieselben Werte. Signaturen gibt es fuer alsa-*, pcre2, libsndfile, bluez und sbc; ihre
-# Pruefung ist noch offen (docs/PLAN_0.7.md).
+# Pruefung ist noch offen (docs/PLAN_0.7.md). libnl und hostapd (fuer den WLAN-Test) kamen
+# am 21.11.2026 dazu, ebenfalls mit Buildroot-Wert geprueft (hostapd zusaetzlich per CI-Download, Lauf 44958153526,
+# libnl per Download von GitHub).
 https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.49/pcre2-10.49.tar.bz2 - -
 https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz - -
 https://www.lua.org/ftp/lua-5.4.9.tar.gz - -
@@ -14,3 +16,5 @@ https://www.kernel.org/pub/linux/bluetooth/sbc-2.1.tar.xz - -
 https://gitlab.freedesktop.org/pipewire/pipewire/-/archive/1.6.6/pipewire-1.6.6.tar.bz2 - -
 https://gitlab.freedesktop.org/pipewire/wireplumber/-/archive/0.5.14/wireplumber-0.5.14.tar.bz2 - -
 https://www.kernel.org/pub/linux/bluetooth/bluez-5.87.tar.xz - -
+https://github.com/thom311/libnl/releases/download/libnl3_12_0/libnl-3.12.0.tar.gz - -
+https://w1.fi/releases/hostapd-2.12.tar.gz - -

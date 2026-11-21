@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""veyra-network: Netzwerk ansehen, WLAN verbinden, Fehler suchen (Veyra 0.6).
+"""veyra-network: Netzwerk ansehen, WLAN verbinden, Fehler suchen (Veyra 0.7).
 
   veyra-network [status]          Geraete, Adressen, Standardroute, DNS, Zeitabgleich
   veyra-network geraete           Netzwerkgeraete (Ethernet, WLAN) mit Treiber und Zustand
   veyra-network wlan liste        WLAN-Netze in Reichweite (braucht iwd)
+  veyra-network wlan status       verbundenes Netz, Sicherheit (WPA2/WPA3), Signal, Adressen
   veyra-network wlan verbinde NETZ   verbinden; das Passwort fragt iwctl selbst ab
+  veyra-network wlan verbinde NETZ --passwort-stdin
+                                  Passwort von der Standardeingabe (Skripte); es wird nur in
+                                  /var/lib/iwd gespeichert (nur root lesbar), nie als Argument
   veyra-network wlan trenne
+  veyra-network wlan vergiss NETZ gespeichertes Netz loeschen (kein automatisches Verbinden mehr)
+
+Bekannte Netze verbindet iwd nach einem Neustart oder Funkloch von selbst wieder.
   veyra-network dns-test [NAME]   Namensaufloesung pruefen (Standard: example.org)
   veyra-network diagnose          alles fuer einen Fehlerbericht, ohne Passwoerter und
                                   ohne MAC-Adressen
@@ -22,6 +29,8 @@ import subprocess
 import sys
 
 SYS = os.environ.get("VEYRA_NETWORK_SYS", "/sys")      # fuer Tests
+IWD_DIR = os.environ.get("VEYRA_NETWORK_IWD", "/var/lib/iwd")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 MAC_RE = re.compile(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b")
 
 
@@ -51,9 +60,10 @@ def geraete():
     d = os.path.join(SYS, "class/net")
     for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
         p = os.path.join(d, n)
-        if n == "lo" or not os.path.exists(os.path.join(p, "device")):
-            continue
         wlan = os.path.isdir(os.path.join(p, "wireless")) or os.path.exists(os.path.join(p, "phy80211"))
+        # Nur echte Karten; WLAN auch ohne device-Verweis (virtuelle Funkgeraete, mac80211_hwsim)
+        if n == "lo" or not (wlan or os.path.exists(os.path.join(p, "device"))):
+            continue
         t = os.path.join(p, "device/driver")
         out.append({"name": n, "art": "WLAN" if wlan else "Ethernet",
                     "treiber": os.path.basename(os.readlink(t)) if os.path.islink(t) else None,
@@ -147,16 +157,72 @@ def cmd_status(_a):
     return 0
 
 
+def iwd_dateiname(netz):
+    """Name der Netzdatei in /var/lib/iwd: Klartext fuer einfache Namen, sonst '=' und Hex."""
+    if re.fullmatch(r"[A-Za-z0-9_ -]+", netz):
+        return netz
+    return "=" + netz.encode().hex()
+
+
+def passwort_speichern(netz, pw):
+    """WPA2/WPA3-Passwort fuer iwd ablegen (gilt fuer PSK und SAE); nur root lesbar."""
+    pw = pw.rstrip("\r\n")
+    if not 8 <= len(pw) <= 63 or "\n" in pw:
+        raise Fehler("ein WLAN-Passwort hat 8 bis 63 Zeichen und keinen Zeilenumbruch")
+    if not 1 <= len(netz.encode()) <= 32:
+        raise Fehler("ein WLAN-Name hat 1 bis 32 Bytes")
+    os.makedirs(IWD_DIR, mode=0o700, exist_ok=True)
+    ziel = os.path.join(IWD_DIR, iwd_dateiname(netz) + ".psk")
+    neu = ziel + ".neu"
+    fd = os.open(neu, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"[Security]\nPassphrase={pw}\n")
+    os.replace(neu, ziel)
+
+
+def station(dev):
+    """Felder aus 'iwctl station DEV show'."""
+    r = lauf(["iwctl", "station", dev, "show"], pruefen=True)
+    f = {}
+    for z in ANSI_RE.sub("", r.stdout).splitlines():
+        m = re.match(r"^\s*(State|Connected network|Security|RSSI|AverageRSSI|Frequency)\s{2,}(\S.*?)\s*$", z)
+        if m:
+            f[m.group(1)] = m.group(2)
+    return f
+
+
 def cmd_wlan(a):
     dev = wlan_geraet(a.geraet)
     if a.aktion == "liste":
         lauf(["iwctl", "station", dev, "scan"], pruefen=True)
         r = lauf(["iwctl", "station", dev, "get-networks"], pruefen=True)
-        print(re.sub(r"\x1b\[[0-9;]*m", "", r.stdout).rstrip())
+        print(ANSI_RE.sub("", r.stdout).rstrip())
+        return 0
+    if a.aktion == "status":
+        f = station(dev)
+        print(f"Geraet:     {dev}")
+        print(f"Zustand:    {f.get('State', '?')}")
+        if f.get("State") == "connected":
+            print(f"Netz:       {f.get('Connected network', '?')}")
+            print(f"Sicherheit: {f.get('Security', '?')}")
+            signal = f.get("AverageRSSI") or f.get("RSSI")
+            print(f"Signal:     {signal or '?'}{'  Frequenz ' + f['Frequency'] + ' MHz' if f.get('Frequency') else ''}")
+        print(f"Adressen:   {', '.join(adressen().get(dev, [])) or '-'}")
+        return 0 if f.get("State") == "connected" else 1
+    if a.aktion in ("verbinde", "vergiss") and not a.netz:
+        raise Fehler(f"{a.aktion} braucht den Namen des Netzes")
+    if a.aktion == "vergiss":
+        lauf(["iwctl", "known-networks", a.netz, "forget"], pruefen=True)
+        print(f"{a.netz} vergessen.")
         return 0
     if a.aktion == "verbinde":
-        if not a.netz:
-            raise Fehler("verbinde braucht den Namen des Netzes")
+        if a.passwort_stdin:
+            passwort_speichern(a.netz, sys.stdin.read())
+            r = lauf(["iwctl", "station", dev, "connect", a.netz])
+            if r.returncode != 0:
+                raise Fehler(f"Verbinden mit {a.netz} gescheitert: {ANSI_RE.sub('', r.stderr or r.stdout).strip()}")
+            print(f"Verbunden mit {a.netz} ({station(dev).get('Security', '?')}).")
+            return 0
         # iwctl fragt das Passwort selbst ab (ohne Echo); es erscheint nie in einer
         # Kommandozeile, einem Log oder in veyra-network.
         return subprocess.run(["iwctl", "station", dev, "connect", a.netz]).returncode
@@ -216,9 +282,10 @@ def main(argv=None):
     sub.add_parser("status")
     sub.add_parser("geraete")
     p = sub.add_parser("wlan")
-    p.add_argument("aktion", choices=("liste", "verbinde", "trenne"))
+    p.add_argument("aktion", choices=("liste", "status", "verbinde", "trenne", "vergiss"))
     p.add_argument("netz", nargs="?")
     p.add_argument("--geraet")
+    p.add_argument("--passwort-stdin", action="store_true")
     p = sub.add_parser("dns-test")
     p.add_argument("name", nargs="?", default="example.org")
     sub.add_parser("diagnose")

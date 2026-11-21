@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Tests fuer veyra-network (packages/base/veyra-network) mit nachgebautem /sys und
 # Ersatzprogrammen fuer ip, resolvectl, timedatectl, systemctl und iwctl.
+# Muster "Befehl && Pruefung || fail" ist hier gewollt (fail beendet den Test).
+# shellcheck disable=SC2015
 set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
 pkg=$here/packages/base/veyra-network
@@ -54,6 +56,7 @@ cat > "$t/bin/iwctl" <<'SH'
 #!/bin/sh
 echo "$*" >> "$IWCTL_LOG"
 [ "$3" = get-networks ] && printf '  Netz-A   psk   ****\n  Netz-B   open  **\n'
+[ "$3" = show ] && printf '                     Station: wlan0\n  \033[1mSettable  Property              Value\033[0m\n            State                 connected\n            Connected network     Netz-A\n            Security              WPA3-Personal\n            RSSI                  -42 dBm\n            AverageRSSI           -44 dBm\n            Frequency             2437\n'
 exit 0
 SH
 chmod +x "$t/bin/"*
@@ -94,5 +97,26 @@ for s in '===== Geraete' '===== Funk (rfkill)' '===== resolvectl' '===== Dienste
 done
 if grep -q -e 'aa:bb:cc' -e 'geheim123' "$t/out"; then fail "MAC-Adresse oder Passwort in der Diagnose"; fi
 ok "diagnose: alle Abschnitte, ohne MAC-Adressen und Passwoerter"
+
+n=$((n + 1))
+mkdir -p "$t/iwd"
+export VEYRA_NETWORK_IWD=$t/iwd
+printf 'geheim-wpa3-123\n' | vn wlan verbinde Netz-A --passwort-stdin > "$t/out" || fail "verbinde --passwort-stdin: $(cat "$t/out")"
+grep -q '^Verbunden mit Netz-A (WPA3-Personal)' "$t/out" || fail "Meldung: $(cat "$t/out")"
+[ "$(stat -c %a "$t/iwd/Netz-A.psk")" = 600 ] || fail "Netzdatei nicht nur fuer root lesbar"
+grep -qx 'Passphrase=geheim-wpa3-123' "$t/iwd/Netz-A.psk" || fail "Netzdatei: $(cat "$t/iwd/Netz-A.psk")"
+grep -q geheim "$t/iwctl.log" && fail "Passwort als Argument an iwctl"
+printf 'geheim-wpa3-123' | vn wlan verbinde 'Café 5G' --passwort-stdin > /dev/null
+[ -f "$t/iwd/=436166c3a9203547.psk" ] || fail "Sonderzeichen im Netznamen: $(ls "$t/iwd")"
+if printf 'kurz' | vn wlan verbinde Netz-A --passwort-stdin 2> "$t/err"; then fail "zu kurzes Passwort angenommen"; fi
+grep -q '8 bis 63 Zeichen' "$t/err" || fail "falsche Meldung: $(cat "$t/err")"
+ok "wlan verbinde --passwort-stdin: Netzdatei nur fuer root, Passwort nie als Argument"
+
+n=$((n + 1))
+vn wlan status > "$t/out" || fail "wlan status: $(cat "$t/out")"
+grep -q '^Netz:       Netz-A$' "$t/out" && grep -q '^Sicherheit: WPA3-Personal$' "$t/out" \
+  && grep -q '^Signal:     -44 dBm  Frequenz 2437 MHz$' "$t/out" || fail "wlan status: $(cat "$t/out")"
+vn wlan vergiss Netz-A > /dev/null && grep -qx 'known-networks Netz-A forget' "$t/iwctl.log" || fail "vergiss"
+ok "wlan status und vergiss"
 
 echo "Alle $n Netzwerk-Tests bestanden."
