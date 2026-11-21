@@ -1,0 +1,13 @@
+# Stufe 6: Connectivity-Grundlage (Veyra 0.7). Rezepte in packages/connect.
+# Gebaut in chroot auf dem Basissystem (Stufe 4b, Teil 4), unabhaengig vom Desktop (Stufe 5);
+# die Pakete kommen nur ins Repository, nicht ins Basisabbild.
+pcre2
+glib
+lua
+alsa-lib
+alsa-utils
+libsndfile
+sbc
+pipewire
+wireplumber
+bluez

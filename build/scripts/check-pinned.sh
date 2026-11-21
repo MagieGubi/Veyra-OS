@@ -17,6 +17,7 @@ while read -r name; do
       open=$((open + 1))
     fi
   done < <(r=packages/core/$name/recipe.sh; [ -f "$r" ] || r=packages/desktop/$name/recipe.sh
+           [ -f "$r" ] || r=packages/connect/$name/recipe.sh
            sources=(); . "$r"; for u in "${sources[@]}"; do echo "${u##*/}"; done)
 done < <(grep -vhE '^\s*(#|$)' stage4/order-*.list)
 echo "Nicht festgeschriebene Quellen: $open"

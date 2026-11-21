@@ -3,7 +3,8 @@
 # Gepinnte Pruefsummen (sources.lock) zaehlen nicht: sie aendern nur, was ohnehin geprueft wird.
 #
 # Aufruf: stage-key.sh 4a | stage-key.sh N   (N = Teil von Stufe 4b; schliesst alle Teile <= N ein;
-#         5 = Stufe 5, Desktop-Grundlage, Rezepte in packages/desktop; 6 = Stufe 5, Teil 2, kitty)
+#         5 = Stufe 5, Desktop-Grundlage, Rezepte in packages/desktop; 6 = Stufe 5, Teil 2, kitty;
+#         7 = Stufe 6, Connectivity, Rezepte in packages/connect: Teile 1 bis 4 und order-7, ohne Stufe 5)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 files=(
@@ -18,9 +19,11 @@ files=(
 if [ "$1" != 4a ]; then
   files+=(build/scripts/vpkg-build build/scripts/ci-stage4b.sh build/scripts/gen-sources-list.sh
           stage4/chroot/30-packages.sh stage4/lfs-12.4-md5sums)
-  for ((i = 1; i <= $1; i++)); do
+  teile=(); for ((i = 1; i <= $1; i++)); do teile+=("$i"); done
+  [ "$1" != 7 ] || teile=(1 2 3 4 7)
+  for i in "${teile[@]}"; do
     files+=("stage4/order-$i.list")
-    d=packages/core; [ "$i" -lt 5 ] || d=packages/desktop
+    d=packages/core; [ "$i" -lt 5 ] || d=packages/desktop; [ "$i" != 7 ] || d=packages/connect
     while read -r name; do
       while IFS= read -r f; do files+=("$f"); done < <(find "$d/$name" -type f | LC_ALL=C sort)
     done < <(grep -vE '^\s*(#|$)' "stage4/order-$i.list")
@@ -29,10 +32,12 @@ fi
 if [ "$1" != 4a ] && [ "$1" -ge 4 ]; then
   files+=(build/scripts/ci-stage4b-4.sh build/scripts/fetch-signed.sh stage4/sources-4.list)
 fi
-if [ "$1" != 4a ] && [ "$1" -ge 5 ]; then
+if [ "$1" = 7 ]; then
+  files+=(build/scripts/ci-stage6.sh stage4/sources-7.list)
+elif [ "$1" != 4a ] && [ "$1" -ge 5 ]; then
   files+=(build/scripts/ci-stage5.sh stage4/sources-5.list)
 fi
-if [ "$1" != 4a ] && [ "$1" -ge 6 ]; then
+if [ "$1" != 4a ] && [ "$1" -ge 6 ] && [ "$1" != 7 ]; then
   files+=(build/scripts/ci-stage5-2.sh stage4/sources-6.list build/tools/fetch-gomod.py)
 fi
 for f in "${files[@]}"; do printf '%s  %s\n' "$(sha256sum < "$f" | cut -d' ' -f1)" "$f"; done \
