@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""veyra-hardwaretest: gefuehrter Test von Veyra 0.7 auf einem echten Laptop.
+
+Fuehrt Schritt fuer Schritt durch WLAN, Ton, Mikrofon, Bluetooth, Akku, Ruhezustand und
+Grafik. Wo nur ein Mensch urteilen kann ("Hoerst du den Ton?"), fragt es nach. Jeder Schritt
+laesst sich ueberspringen (Eingabe "s"). Das Ergebnis steht danach in
+/mnt/daten/veyra-hardwaretest.txt (Partition VEYRA-DATEN, unter Windows lesbar), sonst in
+/root/veyra-hardwaretest.txt. Passwoerter, Seriennummern und Geraeteadressen kommen nicht hinein.
+
+Aufruf (als root): veyra-hardwaretest [--nur wlan,ton,mikrofon,bluetooth,akku,schlaf,grafik]
+"""
+import argparse
+import datetime
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+MAC_RE = re.compile(r"\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b")
+SCHRITTE = ("system", "wlan", "ton", "mikrofon", "bluetooth", "akku", "schlaf", "grafik")
+
+
+class Abbruch(Exception):
+    pass
+
+
+class Bericht:
+    def __init__(self):
+        self.zeilen, self.ergebnisse = [], []
+
+    def notiz(self, text):
+        self.zeilen.append(MAC_RE.sub("xx:xx:xx:xx:xx:xx", text.rstrip()))
+
+    def ergebnis(self, schritt, zustand, text=""):
+        self.ergebnisse.append((schritt, zustand, text))
+        farbe = {"OK": "\033[32m", "FEHLER": "\033[31m"}.get(zustand, "\033[33m")
+        print(f"{farbe}>> {schritt}: {zustand}\033[0m{' (' + text + ')' if text else ''}\n")
+
+    def text(self):
+        kopf = [f"Veyra-Hardwaretest {datetime.datetime.now():%Y-%m-%d %H:%M}",
+                f"Kernel {os.uname().release}", ""]
+        kopf += [f"{z:<12} {s:<22} {t}" for s, z, t in self.ergebnisse]
+        return "\n".join(kopf + ["", "===== Einzelheiten", *self.zeilen, ""])
+
+
+B = Bericht()
+
+
+def lauf(cmd, zeit=120, eingabe=None, zeigen=False):
+    """Fuehrt einen Befehl aus, schreibt Ausgabe in den Bericht; gibt (Status, Ausgabe) zurueck."""
+    B.notiz(f"$ {cmd}")
+    try:
+        r = subprocess.run(cmd, shell=True, text=True, capture_output=True, timeout=zeit, input=eingabe)
+        out = (r.stdout + r.stderr).strip()
+        code = r.returncode
+    except subprocess.TimeoutExpired:
+        out, code = f"(keine Antwort nach {zeit} s)", 124
+    B.notiz(out)
+    if zeigen and out:
+        print(out)
+    return code, out
+
+
+def frage(text, moeglich=("j", "n")):
+    while True:
+        try:
+            a = input(f"{text} [{'/'.join(moeglich)}/s=ueberspringen] ").strip().lower()
+        except EOFError:
+            raise Abbruch()
+        if a == "s":
+            raise Abbruch()
+        if a in moeglich:
+            return a
+
+
+def weiter(text):
+    try:
+        a = input(f"{text} (Enter = weiter, s = ueberspringen) ").strip().lower()
+    except EOFError:
+        raise Abbruch()
+    if a == "s":
+        raise Abbruch()
+
+
+def titel(t):
+    print(f"\n\033[1m===== {t}\033[0m")
+    B.notiz(f"\n===== {t}")
+
+
+def t_system():
+    titel("System und Firmware")
+    lauf("veyra-hwinfo")
+    code, out = lauf("veyra-hwinfo firmware", zeigen=True)
+    lauf("journalctl -k -b --no-pager -o cat | grep -iE 'firmware|i915|iwlwifi|Bluetooth|snd_|sof' | tail -80")
+    B.ergebnis("system", "OK" if code == 0 else "FEHLER",
+               "Firmware vollstaendig" if code == 0 else "Firmware fehlt, siehe Einzelheiten")
+
+
+def t_wlan():
+    titel("WLAN")
+    code, out = lauf("veyra-network wlan liste", zeigen=True)
+    if code != 0:
+        return B.ergebnis("wlan", "FEHLER", "keine Netze (Treiber oder Firmware?)")
+    try:
+        netz = input("Name deines WLANs (genau wie oben, leer = ueberspringen): ").strip()
+    except EOFError:
+        raise Abbruch()
+    if not netz:
+        raise Abbruch()
+    print("iwctl fragt jetzt nach dem Passwort (es landet nicht im Bericht).")
+    B.notiz(f"$ veyra-network wlan verbinde <Netz>")
+    r = subprocess.run(["veyra-network", "wlan", "verbinde", netz])
+    if r.returncode != 0:
+        return B.ergebnis("wlan", "FEHLER", "Verbinden gescheitert")
+    for _ in range(30):
+        if lauf("ip -4 -o addr show scope global | grep -v ' lo '")[0] == 0:
+            break
+        time.sleep(1)
+    _, st = lauf("veyra-network wlan status", zeigen=True)
+    dns, _ = lauf("veyra-network dns-test", zeigen=True)
+    sicher = re.search(r"Sicherheit: (\S+)", st)
+    ok = "Adressen:   -" not in st and dns == 0
+    B.ergebnis("wlan", "OK" if ok else "FEHLER",
+               f"{sicher.group(1) if sicher else '?'}, Adresse und DNS {'ok' if ok else 'fehlen'}")
+
+
+def t_ton():
+    titel("Ton (Lautsprecher)")
+    lauf("veyra-audio geraete", zeigen=True)
+    lauf("veyra-audio stumm ausgabe aus; veyra-audio lautstaerke ausgabe 50")
+    print("Gleich kommt 3 Sekunden ein Pfeifton (440 Hz) aus den Lautsprechern.")
+    weiter("Bereit?")
+    code, _ = lauf("veyra-audio test --sekunden 3", zeigen=True)
+    gehoert = frage("Hast du den Ton aus den Lautsprechern gehoert?")
+    B.ergebnis("ton", "OK" if code == 0 and gehoert == "j" else "FEHLER",
+               "Lautsprecher " + ("gehoert" if gehoert == "j" else "stumm"))
+    try:
+        if frage("Kopfhoerer an der Buchse testen?") == "j":
+            weiter("Kopfhoerer einstecken")
+            lauf("veyra-audio geraete", zeigen=True)
+            lauf("veyra-audio test --sekunden 3")
+            k = frage("Ton im Kopfhoerer (und nicht mehr aus den Lautsprechern)?")
+            B.ergebnis("kopfhoerer", "OK" if k == "j" else "FEHLER")
+    except Abbruch:
+        B.ergebnis("kopfhoerer", "UEBERSPRUNGEN")
+
+
+def t_mikrofon():
+    titel("Eingebautes Mikrofon")
+    lauf("veyra-audio stumm eingabe aus; veyra-audio lautstaerke eingabe 80")
+    weiter("Gleich 4 Sekunden Aufnahme: dabei laut sprechen oder klatschen.")
+    code, out = lauf("veyra-audio aufnahme-test --sekunden 4", zeigen=True)
+    m = re.search(r"(-?\d+(?:\.\d+)?) dBFS", out)
+    pegel = float(m.group(1)) if m else None
+    gut = code in (0, 1) and pegel is not None and pegel > -45
+    B.ergebnis("mikrofon", "OK" if gut else "FEHLER",
+               f"Spitzenpegel {pegel} dBFS" if pegel is not None else "keine Aufnahme")
+
+
+def t_bluetooth():
+    titel("Bluetooth")
+    code, _ = lauf("veyra-bluetooth status", zeigen=True)
+    if code != 0:
+        return B.ergebnis("bluetooth", "FEHLER", "kein Controller oder Dienst laeuft nicht")
+    lauf("veyra-bluetooth an")
+    weiter("Ein Bluetooth-Geraet (Kopfhoerer, Maus) in den Kopplungsmodus bringen")
+    code, out = lauf("veyra-bluetooth suche --sekunden 15")
+    print(out)
+    if code != 0:
+        return B.ergebnis("bluetooth", "FEHLER", "nichts gefunden")
+    try:
+        adr = input("Adresse des Geraets aus der Liste (leer = nur Suche werten): ").strip()
+    except EOFError:
+        raise Abbruch()
+    if not adr:
+        return B.ergebnis("bluetooth", "OK", "Suche findet Geraete, nicht gekoppelt")
+    r = subprocess.run(["veyra-bluetooth", "koppeln", adr])
+    B.notiz(f"koppeln: Status {r.returncode}")
+    if r.returncode != 0:
+        return B.ergebnis("bluetooth", "FEHLER", "Koppeln gescheitert")
+    time.sleep(3)
+    _, g = lauf("veyra-audio geraete", zeigen=True)
+    if "bluetooth" in g:
+        ids = re.findall(r"^\*?\s+(\d+)\s+ausgabe[^\n]*\[bluetooth\]", g, re.M)
+        if ids:
+            lauf(f"veyra-audio standard {ids[0]}; veyra-audio test --sekunden 3")
+            k = frage("Ton im Bluetooth-Kopfhoerer gehoert?")
+            B.ergebnis("bt-kopfhoerer", "OK" if k == "j" else "FEHLER")
+    else:
+        k = frage("Funktioniert das Geraet (Maus bewegt den Zeiger, Tastatur tippt)?")
+        B.ergebnis("bt-eingabe", "OK" if k == "j" else "FEHLER")
+    B.ergebnis("bluetooth", "OK", "gekoppelt und verbunden")
+
+
+def t_akku():
+    titel("Akku und Netzteil")
+    _, a = lauf("veyra-power status", zeigen=True)
+    if "keiner" in a:
+        return B.ergebnis("akku", "FEHLER", "kein Akku erkannt")
+    weiter("Netzteil abziehen")
+    time.sleep(3)
+    _, b = lauf("veyra-power status", zeigen=True)
+    weiter("Netzteil wieder einstecken")
+    time.sleep(3)
+    _, c = lauf("veyra-power status")
+    ok = "entlaedt" in b and "nicht angeschlossen" in b and "Netzteil:      angeschlossen" in c
+    B.ergebnis("akku", "OK" if ok else "FEHLER",
+               "Akku, Netzteilwechsel und Profil auto" if ok else "Netzteilwechsel nicht erkannt")
+
+
+def t_schlaf():
+    titel("Ruhezustand")
+    _, s = lauf("cat /sys/power/mem_sleep", zeigen=True)
+    print("Der Laptop schlaeft jetzt 20 Sekunden und wacht von selbst auf.")
+    weiter("Bereit?")
+    code, out = lauf("veyra-power schlafen --wecken 20", zeit=200, zeigen=True)
+    B.ergebnis("ruhezustand", "OK" if code == 0 else "FEHLER", out.splitlines()[-1] if out else "")
+    try:
+        vorher = open("/sys/power/suspend_stats/success").read().strip()
+        weiter("Jetzt den Deckel schliessen, 15 Sekunden warten, wieder oeffnen und dann Enter")
+        nachher = open("/sys/power/suspend_stats/success").read().strip()
+        B.ergebnis("deckel", "OK" if nachher != vorher else "FEHLER",
+                   "Ruhezustand beim Zuklappen" if nachher != vorher else "kein Ruhezustand beim Zuklappen")
+    except Abbruch:
+        B.ergebnis("deckel", "UEBERSPRUNGEN")
+    lauf("journalctl -b --no-pager -o cat -g 'PM: |suspend|resume' | tail -40")
+
+
+def t_grafik():
+    titel("Grafik")
+    _, out = lauf("journalctl -k -b --no-pager -o cat | grep -E 'i915|GuC|HuC|DMC' | tail -20", zeigen=True)
+    lauf("ls /sys/class/drm; cat /sys/class/drm/card*/device/vendor 2>/dev/null")
+    dmc = "DMC firmware" in out and "Finished loading" in out
+    guc = re.search(r"GuC firmware \S+ version", out) is not None
+    B.ergebnis("grafik", "OK" if dmc and guc else "FEHLER",
+               f"DMC {'geladen' if dmc else 'fehlt'}, GuC {'geladen' if guc else 'fehlt'}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], epilog=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--nur", help="Komma-Liste der Schritte: " + ",".join(SCHRITTE))
+    a = ap.parse_args()
+    if os.geteuid() != 0:
+        print("veyra-hardwaretest: bitte als root starten", file=sys.stderr)
+        return 1
+    nur = a.nur.split(",") if a.nur else SCHRITTE
+    for s in nur:
+        if s not in SCHRITTE:
+            print(f"veyra-hardwaretest: unbekannter Schritt {s}", file=sys.stderr)
+            return 1
+        try:
+            globals()[f"t_{s}"]()
+        except Abbruch:
+            B.ergebnis(s, "UEBERSPRUNGEN")
+        except KeyboardInterrupt:
+            B.ergebnis(s, "ABGEBROCHEN")
+            break
+    ziel = "/mnt/daten/veyra-hardwaretest.txt" if os.path.ismount("/mnt/daten") else "/root/veyra-hardwaretest.txt"
+    with open(ziel, "w") as f:
+        f.write(B.text())
+    if shutil.which("sync"):
+        subprocess.run(["sync"])
+    print(f"\nErgebnis gespeichert: {ziel}")
+    print("\n".join(f"  {s:<14} {z}" for s, z, _ in B.ergebnisse))
+    return 0 if all(z in ("OK", "UEBERSPRUNGEN") for _, z, _ in B.ergebnisse) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

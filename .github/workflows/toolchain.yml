@@ -22,7 +22,7 @@ jobs:
       - name: Werkzeuge installieren
         run: sudo apt-get update && sudo apt-get install -y zstd shellcheck dosfstools mtools
       - name: shellcheck
-        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh tests/audio/*.sh tests/bluetooth/*.sh tests/power/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
+        run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh tests/audio/*.sh tests/bluetooth/*.sh tests/power/*.sh tests/rezepte/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
@@ -33,7 +33,7 @@ jobs:
       - name: Firewall-Regeln testen
         run: sudo apt-get install -y nftables && sudo bash tests/firewall/firewall-test.sh
       - name: Boot-Diagnose testen (kuenstliche Konsolen-Logs)
-        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh && bash tests/recovery/recovery-test.sh && bash tests/hwinfo/hwinfo-test.sh && bash tests/network/network-test.sh && bash tests/audio/audio-test.sh && bash tests/bluetooth/bluetooth-test.sh && bash tests/power/power-test.sh
+        run: bash tests/boot/diagnose-test.sh && bash tests/boot/kernel-update-test.sh && bash tests/recovery/recovery-test.sh && bash tests/hwinfo/hwinfo-test.sh && bash tests/network/network-test.sh && bash tests/audio/audio-test.sh && bash tests/bluetooth/bluetooth-test.sh && bash tests/power/power-test.sh && bash tests/rezepte/lokale-quellen.sh
       - name: Konten testen (Ersteinrichtung, Kontenpruefung)
         run: sudo bash tests/konten/konten-test.sh
       - name: Abbild-Varianten testen (dev und test, mit Probe-System)
@@ -1059,6 +1059,7 @@ jobs:
           for p in veyra-audio veyra-bluetooth veyra-power veyra-laptop; do
             build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir connect "packages/base/$p"
           done
+          build/scripts/vpkg-build --srcdir "$RUNNER_TEMP/quellen" --outdir connect packages/test/veyra-hardwaretest
           python3 packages/base/vpkg/vpkg index --stand "$(git log -1 --format=%ct)" connect
 
       - name: Pakete signieren (wenn das Secret VPKG_SIGNING_KEY eingerichtet ist)
@@ -1129,6 +1130,72 @@ jobs:
         with:
           name: veyra-connect-pakete
           path: connect
+          retention-days: 7
+
+  laptop-test:
+    name: Laptop-Testabbild 0.7 (Testabbild mit Ton, Bluetooth, Energie und Hardwaretest)
+    needs: [image, audio]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Werkzeuge installieren und KVM freigeben
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd fdisk e2fsprogs qemu-system-x86 ovmf
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Testabbild holen
+        uses: actions/download-artifact@v7
+        with:
+          name: veyra-0.6-test
+          path: img
+      - name: Pakete von 0.7 holen (signiertes Repository des Audio-Jobs)
+        uses: actions/download-artifact@v7
+        with:
+          name: veyra-connect-pakete
+          path: connect
+
+      # Nur virtuelle Platte (Abbilddatei): wie "vpkg install" auf einem fertigen System.
+      - name: Pakete ins Testabbild installieren
+        run: |
+          set -o pipefail
+          zstd -q -d --rm img/veyra-0.6-test.img.zst -o veyra-0.7-laptop-test.img
+          read -r start size < <(sfdisk -J veyra-0.7-laptop-test.img | python3 -c '
+          import json, sys
+          p = json.load(sys.stdin)["partitiontable"]["partitions"][1]
+          print(p["start"] * 512, p["size"] * 512)')
+          loop=$(sudo losetup --find --show --offset "$start" --sizelimit "$size" veyra-0.7-laptop-test.img)
+          sudo mkdir -p /mnt/veyra
+          sudo mount "$loop" /mnt/veyra
+          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra install --repo "$PWD/connect" \
+            veyra-audio veyra-bluetooth veyra-power veyra-hardwaretest | tee vpkg-install.log
+          sudo python3 packages/base/vpkg/vpkg --root /mnt/veyra list | grep -E '^(veyra-firmware|veyra-audio|veyra-bluetooth|veyra-power|veyra-hardwaretest) ' | tee -a vpkg-install.log
+          df -h /mnt/veyra | tee -a vpkg-install.log
+          sudo umount /mnt/veyra
+          sudo losetup -d "$loop"
+
+      - name: Boot-Test des Laptop-Testabbilds und Selbsttest
+        run: SELFTEST=1 image/boot-test.sh veyra-0.7-laptop-test.img boot-laptop-test.log 600
+
+      - name: Packen
+        run: |
+          zstd -q -T0 -10 --rm veyra-0.7-laptop-test.img -o veyra-0.7-laptop-test.img.zst
+          sha256sum veyra-0.7-laptop-test.img.zst | tee SHA256SUMS-laptop-test
+
+      - uses: actions/upload-artifact@v6
+        if: success()
+        with:
+          name: veyra-0.7-laptop-test
+          path: |
+            veyra-0.7-laptop-test.img.zst
+            SHA256SUMS-laptop-test
+            boot-laptop-test.log
+            vpkg-install.log
+            docs/hardware-test-0.7.md
           retention-days: 7
 
   live-iso:
