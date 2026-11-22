@@ -32,7 +32,7 @@ root, die **Gruppe `bluetooth`** (`usermod -aG bluetooth NAME`) und der Tondiens
 
 | Prüfung | Wo | Ergebnis |
 | --- | --- | --- |
-| zwei virtuelle Controller (`hci_vhci`, BlueZ-Emulator `btvirt`), suchen, koppeln, verbinden, trennen, entfernen | QEMU (CI, `image/bluetooth-test.py`) | siehe CI |
-| Kopplung übersteht Neustart von bluetoothd | QEMU | siehe CI |
-| Gruppe `bluetooth` darf, andere Benutzer nicht | QEMU | siehe CI |
+| zwei virtuelle Controller (`hci_vhci`, BlueZ-Emulator `btvirt`), suchen, koppeln, verbinden, trennen, entfernen | QEMU (CI, `image/bluetooth-test.py`) | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
+| Kopplung übersteht Neustart von bluetoothd | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
+| Gruppe `bluetooth` darf, andere Benutzer nicht | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
 | echter Chip mit Firmware, Kopfhörer (A2DP), Maus/Tastatur (HID) | echte Hardware | **offen** |

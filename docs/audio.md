@@ -37,11 +37,11 @@ veyra-audio diagnose             alles für einen Fehlerbericht
 
 | Prüfung | Wo | Ergebnis |
 | --- | --- | --- |
-| Dienste starten, WirePlumber meldet Ausgabe und Eingabe | QEMU (CI, `image/audio-test.py`) | siehe CI |
-| Testton kommt an: QEMU schreibt den Ton als WAV-Datei, der Test misst Pegel und Frequenz | QEMU | siehe CI |
-| ALSA-Programm (`aplay`) über PipeWire | QEMU | siehe CI |
-| Aufnahmeweg (QEMU liefert Stille, nur der Weg wird geprüft) | QEMU | siehe CI |
-| Nur Mitglieder von `pipewire` haben Ton | QEMU | siehe CI |
+| Dienste starten, WirePlumber meldet Ausgabe und Eingabe | QEMU (CI, `image/audio-test.py`) | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
+| Testton kommt an: QEMU schreibt den Ton als WAV-Datei, der Test misst Pegel und Frequenz | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) (4,2 s Signal, Spitze −10,2 dBFS) |
+| ALSA-Programm (`aplay`) über PipeWire | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
+| Aufnahmeweg (QEMU liefert Stille, nur der Weg wird geprüft) | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
+| Nur Mitglieder von `pipewire` haben Ton | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
 | Lautsprecher, Kopfhörerbuchse, eingebautes Mikrofon | echte Hardware | **offen** (docs/hardware-compatibility.md) |
 | HDMI-Ton, USB-Headset, Bluetooth-Kopfhörer | echte Hardware | **offen** |
 

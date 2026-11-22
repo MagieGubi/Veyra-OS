@@ -45,6 +45,7 @@ weil Veyra keinen Swap anlegt.
 | Prüfung | Wo | Ergebnis |
 | --- | --- | --- |
 | Profile, Akku-Berechnung, Netzteilwechsel, Seriennummern verborgen | Einzeltests (`tests/power`) | grün |
-| Ruhezustand s2idle und S3, Wecken über die Echtzeituhr, Dienste laufen danach weiter | QEMU (CI, `image/power-test.py`) | siehe CI |
-| Profil nach Neustart angewendet | QEMU | siehe CI |
+| Ruhezustand S3 (deep): einschlafen, von der Echtzeituhr geweckt, Dienste laufen weiter | QEMU (CI, `image/power-test.py`) | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
+| Ruhezustand s2idle: einschlafen und weiterarbeiten | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995), aber in QEMU weckt die Echtzeituhr s2idle nicht; der Test weckt dann mit der Ein-Taste (QEMU-Monitor) und sagt das. RTC-Wecken aus s2idle ist nur auf Hardware prüfbar |
+| Profil nach Neustart angewendet | QEMU | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
 | Akku, Netzteil, Deckel, intel_pstate, Ruhezustand am Laptop | echte Hardware | **offen** |

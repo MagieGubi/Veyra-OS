@@ -35,7 +35,7 @@ bekannte Netze von selbst.
 | Prüfung | Wo | Ergebnis |
 | --- | --- | --- |
 | Ethernet mit DHCP, DNS | QEMU (Selbsttest bei jedem Lauf) | ✅ |
-| WLAN: zwei virtuelle Funkgeräte (mac80211_hwsim), hostapd als Zugangspunkt, WPA2-PSK und WPA3-SAE, Adresse per DHCP, IPv6 per SLAAC, Autoconnect nach Neustart | QEMU (CI, `image/wlan-test.py`) | siehe CI |
+| WLAN: zwei virtuelle Funkgeräte (mac80211_hwsim), hostapd als Zugangspunkt, WPA2-PSK und WPA3-SAE, Adresse per DHCP, IPv6 per SLAAC, Autoconnect nach Neustart | QEMU (CI, `image/wlan-test.py`) | [bestanden](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995) |
 | echter WLAN-Chip mit Firmware, echter Router | echte Hardware | **offen** (docs/hardware-test-0.7.md) |
 
 Grenze des QEMU-Tests: beide Funkgeräte gehören zur selben VM. Datenverkehr zwischen ihnen

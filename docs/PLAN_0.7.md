@@ -64,3 +64,15 @@ von 0.7 verlangen diese Tests; ohne sie wird 0.7 nicht als fertig gemeldet.**
    Adrians Laptop.
 
 Jeder Schritt ist erst fertig, wenn sein Test im CI grün ist.
+
+## 4. Stand (22.11.2026)
+
+Schritte 1 bis 7 und 9 sind im CI grün ([Lauf 44969457995](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995)): Ton, Bluetooth, WLAN (WPA2/WPA3),
+Energie und das Laptop-Testabbild `veyra-0.7-laptop-test` mit `veyra-hardwaretest`.
+Bekannte Grenze in QEMU: die Echtzeituhr weckt s2idle nicht (S3 schon).
+
+Offen:
+- Hardwaretest auf Adrians Laptop ([hardware-test-0.7.md](hardware-test-0.7.md)), Pflicht für 0.7
+- Schritt 8: amdgpu mit Firmware; NVIDIA nur dokumentiert
+- SOF erst nach den Hardware-Ergebnissen
+- Signaturprüfung der Quellen von Stufe 6, 0.7-Pakete ins signierte Hauptrepository

@@ -1,6 +1,6 @@
 # Veyra OS: Systemstatus
 
-Stand: 20.11.2026, Veyra OS 0.6.0. Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
+Stand: 22.11.2026, Veyra OS 0.6.0 plus 0.7 in Arbeit (QEMU-Nachweise; Hardwaretest steht aus). Kurzübersicht, was nachweislich funktioniert. Details und Begründungen:
 [FULL_SYSTEM_AUDIT.md](FULL_SYSTEM_AUDIT.md), Planung: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md),
 Aufgaben mit Akzeptanzkriterien: [../ROADMAP.md](../ROADMAP.md).
 
@@ -28,11 +28,13 @@ Status: ✅ funktioniert (mit Nachweis) · 🟡 umgesetzt, Nachweis steht aus ·
 | Netzwerk per Kabel (DHCP, DNS), keine offenen Ports | ✅ | Selbsttest in QEMU (e1000e) |
 | Firewall (nftables, eingehend und Weiterleiten verworfen) | ✅ | Selbsttest „Firewall: ok“ im Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331); [security.md](security.md) |
 | Kernel-Härtung (Kernel-Optionen, 19 sysctl-Werte, Yama) | ✅ | Selbsttest „Kernel-Härtung: ok“ im Lauf [44263921331](https://github.com/MagieGubi/Veyra-OS/actions/runs/44263921331) |
-| WLAN-Software (iwd 3.12, wireless-regdb, `veyra-network`) | 🔧 | QEMU: iwd läuft und erkennt ein virtuelles Funkgerät (mac80211_hwsim), regulatory.db lädt ([Lauf](https://github.com/MagieGubi/Veyra-OS/actions/runs/44426903469)); echtes WLAN nie geprüft |
-| WLAN-Firmware (`veyra-firmware-intel-wlan`, AX201/AX210/AX211) | 🔧 | im Repository und im Testabbild; nie auf echter Hardware geladen |
-| Bluetooth, Audio, Drucker | ⬜ | – |
+| WLAN (iwd 3.12, hostapd nur im Test, `veyra-network wlan`) | ✅ | QEMU mit mac80211_hwsim: WPA2-PSK und WPA3-SAE verbunden, DHCP, IPv6 per SLAAC, Autoconnect nach Neustart, Passwortdatei nur für root ([Lauf 44969457995](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995)); echtes WLAN nie geprüft |
+| Firmware-Pakete (`veyra-firmware-intel-wlan`, `-intel-grafik`, `-intel-bluetooth`, SHA-256 je Datei, Lizenz, Hardware-Zuordnung; `veyra-hwinfo firmware`) | 🔧 | Selbsttest prüft Prüfsummen; nie auf echter Hardware geladen |
+| Ton (PipeWire, WirePlumber, pipewire-pulse, `veyra-audio`) | ✅ | QEMU: Testton kommt als WAV auf dem Wirt an (Pegel und Frequenz gemessen), aplay über PipeWire, Aufnahmeweg, Rechte über Gruppe `pipewire` ([Lauf 44969457995](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995)); nie auf echter Hardware, SOF noch aus |
+| Bluetooth (BlueZ, `veyra-bluetooth`) | ✅ | QEMU mit zwei virtuellen Controllern: suchen, koppeln, verbinden, trennen, entfernen; nur Gruppe `bluetooth` hat Zugriff ([Lauf 44969457995](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995)); nie auf echter Hardware |
+| Energie (`veyra-power`: Profile, Ruhezustand, logind) | 🔧 | QEMU: S3 von der Echtzeituhr geweckt, s2idle nur per Ein-Taste geweckt, Profil übersteht Neustart ([Lauf 44969457995](https://github.com/MagieGubi/Veyra-OS/actions/runs/44969457995)); Akku und CPU-Takt nur auf Hardware |
+| Drucker | ⬜ | – |
 | Hardware (NVMe, USB, Intel-Grafik, Tastatur) | 🔧 | Treiber im Kernel, nie auf echter Hardware geprüft; `veyra-hwinfo` zeigt Geräte ohne Treiber |
-| Firmware | ⬜ | `regulatory.db` fehlt laut Kernel-Log |
 | Installer 0.3 (`veyra-install`, Kommandozeile, ganzer Datenträger, GPT mit ESP und ext4, Konten bei der Installation, alte Partitionstabelle bei Fehler zurück) | ✅ | Lauf [44114798590](https://github.com/MagieGubi/Veyra-OS/actions/runs/44114798590): Installation auf leere 8-GiB-Platte; erster Start mit Ersteinrichtung, Anmeldung als neuer Benutzer, `su`, Neustart, Anmeldung als root; 20 Installer-Tests; nie auf echter Hardware |
 | Mehrere Veyra-Platten | ✅ | Neue Installationen starten über `PARTUUID` die eigene Partition; nur beim Direktstart warnt die Startprüfung weiterhin |
 | Updates und Rollback des Systems | ⬜ | nur Paket-Transaktionen mit Rücknahme |
