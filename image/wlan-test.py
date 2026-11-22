@@ -148,9 +148,9 @@ def main():
         vm.befehl("veyra-network wlan verbinde veyra-test-wpa2 --passwort-stdin < /etc/veyra-test/passwort; "
                   "echo V-$?", r"Verbunden mit veyra-test-wpa2 \(WPA2-Personal\)[\s\S]*V-0", 90)
         vm.befehl("for i in $(seq 30); do ip -4 addr show wlan0 | grep -q 'inet 10\\.77\\.0\\.' && "
-                  "ip -6 addr show wlan0 | grep -q 'inet6 fd77:0:0:1:' && break; sleep 1; done; "
+                  "ip -6 addr show wlan0 | grep -qE 'inet6 fd77:(0:0:1:|:1:)' && break; sleep 1; done; "
                   "veyra-network wlan status; echo S-$((5+5))",
-                  r"Sicherheit: WPA2-Personal[\s\S]*Adressen:[^\r\n]*10\.77\.0\.\d+/24[^\r\n]*fd77:0:0:1:[\s\S]*S-10", 60)
+                  r"Sicherheit: WPA2-Personal[\s\S]*Adressen:[^\r\n]*10\.77\.0\.\d+/24[^\r\n]*fd77:(0:0:1:|:1:)[\s\S]*S-10", 60)
         vm.befehl("hostapd_cli -p /run/hostapd all_sta | grep -i AKMSuiteSelector; echo K-$((5+6))",
                   r"AKMSuiteSelector=00-0f-ac-2[\s\S]*K-11", 30)
         ok("WPA2-Personal: verbunden, IPv4 per DHCP, IPv6 per SLAAC, AKM PSK")

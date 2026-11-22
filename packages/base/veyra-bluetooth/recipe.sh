@@ -5,13 +5,13 @@
 # (tests/bluetooth/bluetooth-test.sh prueft das).
 pkgname=veyra-bluetooth
 pkgver=0.7
-pkgrel=1
+pkgrel=2
 pkgdesc="Bluetooth: BlueZ und veyra-bluetooth (Metapaket)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-bluetooth)
 sources=(veyra-bluetooth veyra-bluetooth-dbus.conf bluetooth-sysusers.conf)
-sha256sums=(0f5bbe46226314a76f5281c24de8eb8d5a6134e535757912eb2b9230d006820f 18616a92d50d9d1c8c167abcbca4d83566ebb4569d6bbf71432a563829814ed2 4a692581cee42b77d201fd9e5777d5ca88f5dbd69143e2a5ea89480ee69afabb)
+sha256sums=(0f5bbe46226314a76f5281c24de8eb8d5a6134e535757912eb2b9230d006820f ce9a4c901678aac38d8e0c7064cb30239ae88a6714366807d605f1f58f20bd9c 4a692581cee42b77d201fd9e5777d5ca88f5dbd69143e2a5ea89480ee69afabb)
 depends=(python systemd dbus bluez)
 
 package() {
