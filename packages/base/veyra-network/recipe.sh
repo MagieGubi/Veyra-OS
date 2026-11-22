@@ -4,13 +4,13 @@
 # sha256sums angepasst werden (tests/network/network-test.sh prueft das).
 pkgname=veyra-network
 pkgver=0.7
-pkgrel=1
+pkgrel=2
 pkgdesc="Netzwerkwerkzeug und Netzwerk per Kabel mit DHCP, DNS und TLS-Wurzelzertifikaten (Metapaket)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-network)
 sources=(veyra-network)
-sha256sums=(3cbf221dfba11dba64c0999a347fe1796f691fe1c9b4914c5abc8f7529061cce)
+sha256sums=(eb7a6c69c37d68ef27b7078e74b8cec699a0919c69966630a1c17792f4dd81f7)
 depends=(python systemd iproute2 iwd wireless-regdb veyra-netzwerk veyra-zertifikate)
 
 package() {

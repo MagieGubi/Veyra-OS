@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Ton (Veyra 0.7) in QEMU: startet das Entwicklungsabbild mit einer HD-Audio-Karte
-(ich9-intel-hda mit hda-duplex). QEMU schreibt alles, was der Gast abspielt, in eine WAV-Datei
+(zwei ich9-intel-hda: hda-output und hda-micro). QEMU schreibt alles, was der Gast abspielt, in eine WAV-Datei
 auf dem Wirt. Auf der Platte ist zusaetzlich @veyra-audio installiert (PipeWire, WirePlumber,
 pipewire-pulse als Systemdienste, veyra-audio).
 
@@ -80,11 +80,18 @@ def main():
     logdir = os.path.abspath(logdir)
     wav = os.path.join(logdir, "qemu-ausgabe.wav")
     tmp = tempfile.mkdtemp(prefix="veyra-audio-test.")
-    ton = ["-device", "ich9-intel-hda", "-device", "hda-duplex,audiodev=ton",
-           "-audiodev", f"wav,id=ton,path={wav}"]
+    # Zwei Karten: QEMUs WAV-Ausgabe kann nichts aufnehmen. Karte 0 (Steckplatz 8) gibt in
+    # die WAV-Datei aus, Karte 1 (Steckplatz 9) hat ein Mikrofon an einem stummen Eingang
+    # (audiodev none liefert Stille im richtigen Takt).
+    ton = ["-device", "ich9-intel-hda,id=hda0,addr=0x08",
+           "-device", "hda-output,audiodev=ton,bus=hda0.0",
+           "-audiodev", f"wav,id=ton,path={wav}",
+           "-device", "ich9-intel-hda,id=hda1,addr=0x09",
+           "-device", "hda-micro,audiodev=still,bus=hda1.0",
+           "-audiodev", "none,id=still"]
     vm = None
     try:
-        schritt("Start mit HD-Audio (ich9-intel-hda, hda-duplex), Ausgabe als WAV auf dem Wirt")
+        schritt("Start mit zwei HD-Audio-Karten (Ausgabe als WAV auf dem Wirt, Mikrofon mit Stille)")
         vm = VM(platte, os.path.join(logdir, "audio.log"), tmp, extra=ton)
         vm.erwarte(r"veyra login:", 300)
         try:
@@ -108,6 +115,17 @@ def main():
                   r"Standard-ausgabe: [^\r\n]*\(ID \d+\)[\s\S]*Standard-eingabe: [^\r\n]*\(ID \d+\)"
                   r"[\s\S]*\*\s+\d+\s+ausgabe[\s\S]*G-6", 60)
         ok("WirePlumber meldet Standard-Ausgabe und -Eingabe")
+        # Standard ausdruecklich setzen: Ausgabe der Karte mit der WAV-Datei, Eingabe vom Mikrofon.
+        vm.befehl("for i in $(seq 20); do veyra-audio geraete --json > /tmp/g.json; "
+                  "grep -q 'alsa_output.pci-0000_00_08' /tmp/g.json && grep -q 'alsa_input.pci-0000_00_09' /tmp/g.json && break; "
+                  "sleep 1; done; python3 -c 'import json; g=json.load(open(\"/tmp/g.json\")); "
+                  "print(*[x[\"id\"] for x in g if x[\"name\"].startswith(\"alsa_output.pci-0000_00_08\")][:1], "
+                  "*[x[\"id\"] for x in g if x[\"name\"].startswith(\"alsa_input.pci-0000_00_09\")][:1])' > /tmp/ids; "
+                  "veyra-audio standard $(cut -d\" \" -f1 /tmp/ids) && veyra-audio standard $(cut -d\" \" -f2 /tmp/ids); "
+                  "sleep 1; veyra-audio status; echo S-$?",
+                  r"Standard ist jetzt ID \d+[\s\S]*Standard ist jetzt ID \d+[\s\S]*"
+                  r"Standard-ausgabe: [^\r\n]*\(ID \d+\)[\s\S]*S-0", 60)
+        ok("Standard: Ausgabe der Karte 0 (WAV), Eingabe Mikrofon der Karte 1")
         vm.befehl("useradd -m -G pipewire tontest && su - tontest -c 'veyra-audio geraete' | grep -c '^\\*' | sed 's/^/SICHTBAR=/'; "
                   "useradd -m ohneton && su - ohneton -c 'veyra-audio geraete' 2>&1 | tail -1; echo U-$((4+4))",
                   r"SICHTBAR=2\s*\r?\n[\s\S]*veyra-audio: kein PipeWire[^\r\n]*[\s\S]*U-8", 60)

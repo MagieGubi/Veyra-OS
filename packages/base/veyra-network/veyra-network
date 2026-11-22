@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 SYS = os.environ.get("VEYRA_NETWORK_SYS", "/sys")      # fuer Tests
 IWD_DIR = os.environ.get("VEYRA_NETWORK_IWD", "/var/lib/iwd")
@@ -191,10 +192,23 @@ def station(dev):
     return f
 
 
+def scannt(dev):
+    r = lauf(["iwctl", "station", dev, "show"])
+    m = re.search(r"^\s*Scanning\s{2,}(\S+)", ANSI_RE.sub("", r.stdout), re.M) if r else None
+    return m.group(1) if m else "?"
+
+
 def cmd_wlan(a):
     dev = wlan_geraet(a.geraet)
     if a.aktion == "liste":
-        lauf(["iwctl", "station", dev, "scan"], pruefen=True)
+        r = lauf(["iwctl", "station", dev, "scan"])
+        if r.returncode != 0 and "already in progress" not in (r.stderr + r.stdout):
+            raise Fehler(f"iwctl station {dev} scan: {ANSI_RE.sub('', r.stderr or r.stdout).strip()}")
+        # Suche abwarten (iwd sucht beim Start und beim automatischen Verbinden selbst)
+        for _ in range(20):
+            if scannt(dev) != "yes":
+                break
+            time.sleep(0.5)
         r = lauf(["iwctl", "station", dev, "get-networks"], pruefen=True)
         print(ANSI_RE.sub("", r.stdout).rstrip())
         return 0

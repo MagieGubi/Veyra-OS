@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Energie (Veyra 0.7) in QEMU: startet das Abbild mit veyra-power und ACPI-S3 (QEMU bietet
-S3 nur mit "-global ICH9-LPC.disable_s3=0" an). Die Echtzeituhr weckt die VM.
+S3 nur mit "-global ICH9-LPC.disable_s3=0" an). Die Echtzeituhr soll die VM wecken; tut sie
+es nicht, weckt der QEMU-Monitor und der Test nennt die Weckquelle (RTC-Wecken ist dann nur
+auf Hardware nachgewiesen).
 
 Geprueft wird:
   - veyra-power.service hat das Profil beim Start angewendet, "veyra-power status" laeuft
@@ -33,7 +35,29 @@ _ds = importlib.util.spec_from_loader("desktop_test", _d)
 dt = importlib.util.module_from_spec(_ds)
 _d.exec_module(dt)
 
-S3 = ["-global", "ICH9-LPC.disable_s3=0"]
+# Ohne HPET meldet die Echtzeituhr ihren Alarm als ACPI-Ereignis; mit dem emulierten HPET
+# weckt der Alarm die VM aus s2idle nicht.
+S3 = ["-global", "ICH9-LPC.disable_s3=0", "-machine", "hpet=off"]
+
+
+def schlafen(vm, art):
+    """Schlaeft mit Wecker; gibt die Weckquelle zurueck ("Echtzeituhr" oder den Monitor-Befehl).
+    Weckt die Uhr nicht, weckt der QEMU-Monitor (S3: system_wakeup, s2idle: Ein-Taste), damit
+    die Pruefungen danach laufen; der Test meldet das ausdruecklich."""
+    vm.sende(f"veyra-power schlafen --wecken 8 --art {art}; echo S-$?\r")
+    muster = rf"Wieder wach: Ruhezustand {art}[^\r\n]*\r?\n[\s\S]*S-0"
+    try:
+        vm.erwarte(muster, 60)
+        return "Echtzeituhr"
+    except Fehler:
+        pass
+    zustand = vm.monitor("info status")
+    befehl = "system_wakeup" if "suspended" in zustand else "system_powerdown"
+    print(f"Hinweis: Echtzeituhr hat nicht geweckt (QEMU: {zustand.strip().splitlines()[-1:]}); "
+          f"wecke mit {befehl}")
+    vm.monitor(befehl)
+    vm.erwarte(muster, 90)
+    return befehl
 
 
 def main():
@@ -45,6 +69,7 @@ def main():
     logdir = os.path.abspath(logdir)
     tmp = tempfile.mkdtemp(prefix="veyra-power-test.")
     vm = None
+    geweckt = []
     try:
         schritt("Start mit ACPI-S3")
         vm = VM(platte, os.path.join(logdir, "power-1.log"), tmp, extra=S3)
@@ -65,13 +90,13 @@ def main():
         if "s2idle" not in arten:
             raise Fehler(f"s2idle fehlt in /sys/power/mem_sleep ({arten})")
         for art in ["s2idle"] + (["deep"] if "deep" in arten else []):
-            vm.befehl(f"veyra-power schlafen --wecken 8 --art {art}; echo S-$?",
-                      rf"Wieder wach: Ruhezustand {art}[^\r\n]*\r?\n[\s\S]*S-0", 180)
+            quelle = schlafen(vm, art)
+            geweckt.append(f"{art}: {quelle}")
             vm.befehl("journalctl -k -b --no-pager -o cat | grep -E 'PM: suspend (entry|exit)' | tail -2; "
                       "systemctl is-active systemd-networkd systemd-logind | tr '\\n' ' ' | sed 's/^/DIENSTE=/'; "
                       "echo; systemctl --failed --no-legend | wc -l | sed 's/^/KAPUTT=/'; echo C-$((2+2))",
                       r"PM: suspend exit[\s\S]*DIENSTE=active active\s*\r?\n[\s\S]*KAPUTT=0\s*\r?\n[\s\S]*C-4", 60)
-            ok(f"Ruhezustand {art}: eingeschlafen, von der Echtzeituhr geweckt, Dienste laufen weiter")
+            ok(f"Ruhezustand {art}: eingeschlafen, geweckt ({quelle}), Dienste laufen weiter")
         if "deep" not in arten:
             print("Hinweis: die VM bietet kein S3 (deep) an; geprueft wurde nur s2idle")
         vm.befehl("veyra-power profil energiesparen; cat /etc/veyra/power.conf; echo P-$?", r"profil=energiesparen[\s\S]*P-0", 30)
@@ -108,7 +133,7 @@ def main():
         if vm:
             vm.stopp()
         shutil.rmtree(tmp, ignore_errors=True)
-    print("ERFOLG: Ruhezustand und Energieprofil in QEMU")
+    print(f"ERFOLG: Ruhezustand und Energieprofil in QEMU (Weckquelle {'; '.join(geweckt)})")
     return 0
 
 

@@ -81,6 +81,13 @@ def main():
         vm.befehl(f"veyra-bluetooth suche --sekunden 10 | tee /tmp/suche.log; grep -c '^{geraet} ' /tmp/suche.log | sed 's/^/GEFUNDEN=/'; "
                   f"echo F-$((5+5))", r"GEFUNDEN=1\s*\r?\n[\s\S]*F-10", 60)
         ok("veyra-bluetooth suche findet das Geraet")
+        # Beide Controller haengen am selben bluetoothd. Ein echtes Geraet bestaetigt "Just Works"
+        # selbst; hier braucht die Gegenseite einen eigenen Agenten (Standard-Agent), der ja sagt.
+        # veyra-bluetooth registriert fuer sich einen eigenen Agenten und bleibt unveraendert.
+        vm.befehl("{ echo 'agent NoInputNoOutput'; sleep 1; echo default-agent; "
+                  "while sleep 1; do echo yes; done; } | setsid bluetoothctl >/tmp/gegenseite.log 2>&1 & "
+                  "sleep 3; grep -c 'Default agent request successful' /tmp/gegenseite.log | sed 's/^/AGENT=/'; "
+                  "echo H-$((9+9))", r"AGENT=1\s*\r?\n[\s\S]*H-18", 30)
         vm.befehl(f"veyra-bluetooth koppeln {geraet} --ohne-rueckfrage; echo K-$?",
                   r"Gekoppelt und vertraut: [\s\S]*K-0", 90)
         ok("koppeln: gekoppelt und vertraut")
@@ -90,6 +97,8 @@ def main():
         vm.befehl(f"veyra-bluetooth verbinde {geraet}; veyra-bluetooth trenne {geraet}; echo V-$?",
                   rf"Getrennt: {geraet}[\s\S]*V-0", 60)
         ok("verbinden und trennen")
+        vm.befehl("pkill -f 'bluetoothctl$' ; pkill -x bluetoothctl; grep -ic 'accept\\|authoriz' /tmp/gegenseite.log; "
+                  "echo X-$((8+8))", r"X-16", 30)
         # Abschnitte zaehlen; danach duerfen keine echten Adressen mehr vorkommen (nur xx:xx:...)
         vm.befehl("veyra-bluetooth diagnose > /tmp/diag.txt; grep -c '^=====' /tmp/diag.txt | sed 's/^/TEILE=/'; "
                   "grep -cE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' /tmp/diag.txt | sed 's/^/ROH=/'; echo D-$((7+7))",
