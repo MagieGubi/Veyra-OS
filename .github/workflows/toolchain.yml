@@ -25,6 +25,12 @@ jobs:
         run: shellcheck -x build/scripts/* toolchain/*.sh temptools/*.sh kernel/*.sh stage4/*.sh stage4/chroot/*.sh image/*.sh tests/vpkg/*.sh tests/boot/*.sh tests/konten/*.sh tests/image/*.sh tests/installer/*.sh tests/firewall/*.sh tests/recovery/*.sh tests/hwinfo/*.sh tests/network/*.sh tests/audio/*.sh tests/bluetooth/*.sh tests/power/*.sh tests/rezepte/*.sh packages/base/veyra-konten/veyra-* packages/base/veyra-desktop/veyra-desktop packages/test/veyra-desktop-test/bild.sh packages/base/veyra-installer/veyra-rootpruefung
       - name: vpkg-build und vpkg-verify testen
         run: bash tests/vpkg/run.sh
+      - name: Quellen der Zusatzpakete aus dem Cache (fetch-extra.sh prueft jede Datei nach)
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/quellen
+          key: quellen-${{ hashFiles('packages/base/*/recipe.sh', 'packages/test/*/recipe.sh') }}
+          restore-keys: quellen-
       - name: VPKG testen (installieren, entfernen, Abhaengigkeiten, Transaktionen)
         run: |
           python3 -m py_compile packages/base/vpkg/vpkg
@@ -764,6 +770,12 @@ jobs:
           pattern: pakete-4b-*
           path: basis
 
+      - name: Quellen der Zusatzpakete aus dem Cache (fetch-extra.sh prueft jede Datei nach)
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/quellen
+          key: quellen-${{ hashFiles('packages/base/*/recipe.sh', 'packages/test/*/recipe.sh') }}
+          restore-keys: quellen-
       - name: Zusatzpakete bauen (veyra-release, veyra-netzwerk, veyra-konten, veyra-installer, veyra-zertifikate, veyra-sicherheit, veyra-firewall, Metapakete, vpkg, Selbsttest, Firmware)
         run: |
           build/scripts/fetch-extra.sh "$RUNNER_TEMP/quellen"

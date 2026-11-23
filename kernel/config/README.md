@@ -11,4 +11,5 @@ kommen erst mit Messung gegen diese Referenz (siehe docs/architecture.md).
 
 Core 0.1 zielt auf eine QEMU-VM (UEFI, virtio). `veyra-30-hardware.config` ergänzt für
 Phase 6 echte Laptops mit Intel-CPU (NVMe, Start vom USB-Stick, Intel-Grafik, Tastatur,
-Touchpad, WLAN-Treiber). AMD-Grafik und NVIDIA folgen später.
+Touchpad, WLAN-Treiber). `veyra-88-amdgpu.config` (0.7) baut amdgpu als Modul; NVIDIA bleibt aus
+(docs/hardware-compatibility.md).

@@ -4,13 +4,13 @@
 # (tests/hwinfo/hwinfo-test.sh prueft das).
 pkgname=veyra-hwinfo
 pkgver=0.2
-pkgrel=1
+pkgrel=2
 pkgdesc="Hardware erkennen und beschreiben (nur lesen, Text und JSON)"
 license=MIT
 url=https://github.com/MagieGubi/Veyra-OS
 groups=(veyra-base)
 sources=(veyra-hwinfo firmware-katalog.json)
-sha256sums=(cfffd7aa85369045eeb90bfc95bac2a12b4b8a0b70df7552f0b0d78de402ce49 3996428bf42851f603125fd83074da0b45105c4838dfe9b189dfb3197e2fe258)
+sha256sums=(cfffd7aa85369045eeb90bfc95bac2a12b4b8a0b70df7552f0b0d78de402ce49 c2518d978c8a30cafde543950cd8090c7527c34ac36389f1fd28392f4a88b952)
 depends=(python)
 
 package() {

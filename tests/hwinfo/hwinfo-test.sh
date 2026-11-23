@@ -145,13 +145,15 @@ Bluetooth: hci0: Failed to load Intel firmware file intel/ibt-0040-0041.sfi (-2)
 iwlwifi 0000:00:14.3: Direct firmware load for iwlwifi-so-a0-gf-a0-89.ucode failed with error -2
 snd_sof_pci_intel_tgl 0000:00:1f.3: SOF firmware and/or topology file not found.
 amdgpu 0000:03:00.0: Direct firmware load for amdgpu/psp_13_0_4_toc.bin failed with error -2
+radeon 0000:04:00.0: Direct firmware load for radeon/hawaii_smc.bin failed with error -2
 LOG
 rc=0; VEYRA_HWINFO_KERNELLOG=$t/kernel.log hw firmware > "$t/fw" || rc=$?
 [ "$rc" = 1 ] || fail "firmware: Status $rc bei fehlender Firmware"
 grep -q '^  veyra-firmware-intel-grafik *installiert (20261019) *Intel-Grafik$' "$t/fw" || fail "Grafik: $(cat "$t/fw")"
 grep -q '^  veyra-firmware-intel-bluetooth *fehlt' "$t/fw" || fail "Bluetooth: $(cat "$t/fw")"
 grep -q 'Kernel vermisst: intel/ibt-0040-0041.sfi -> veyra-firmware-intel-bluetooth' "$t/fw" || fail "vermisst: $(cat "$t/fw")"
-grep -q 'Kernel vermisst: amdgpu/psp_13_0_4_toc.bin -> in keinem Veyra-Paket' "$t/fw" || fail "unbekannte Datei: $(cat "$t/fw")"
+grep -q 'Kernel vermisst: amdgpu/psp_13_0_4_toc.bin -> veyra-firmware-amd-grafik' "$t/fw" || fail "AMD: $(cat "$t/fw")"
+grep -q 'Kernel vermisst: radeon/hawaii_smc.bin -> in keinem Veyra-Paket' "$t/fw" || fail "unbekannte Datei: $(cat "$t/fw")"
 grep -q 'adlp_dmc' "$t/fw" && fail "geladene Firmware als vermisst gemeldet"
 VEYRA_HWINFO_KERNELLOG=$t/kernel.log hw firmware --json > "$t/fw.json" || true
 python3 - "$t/fw.json" <<'PY' || fail "firmware --json: $(cat "$t/fw.json")"
@@ -160,7 +162,7 @@ f = json.load(open(sys.argv[1]))
 p = {x["paket"]: x for x in f["pakete"]}
 assert p["veyra-firmware-intel-grafik"]["installiert"] and p["veyra-firmware-intel-grafik"]["version"] == "20261019"
 assert p["veyra-firmware-intel-bluetooth"]["gebraucht"] and not p["veyra-firmware-intel-bluetooth"]["installiert"]
-assert {v["datei"] for v in f["vermisst"]} == {"intel/ibt-0040-0041.sfi", "amdgpu/psp_13_0_4_toc.bin"}, f["vermisst"]
+assert {v["datei"] for v in f["vermisst"]} == {"intel/ibt-0040-0041.sfi", "amdgpu/psp_13_0_4_toc.bin", "radeon/hawaii_smc.bin"}, f["vermisst"]
 assert any("vpkg install veyra-firmware-intel-bluetooth" in h for h in f["hinweise"])
 PY
 ok "firmware: installiert mit Version, fehlend, vom Kernel vermisste Dateien mit Paket"

@@ -73,6 +73,6 @@ Bekannte Grenze in QEMU: die Echtzeituhr weckt s2idle nicht (S3 schon).
 
 Offen:
 - Hardwaretest auf Adrians Laptop ([hardware-test-0.7.md](hardware-test-0.7.md)), Pflicht für 0.7
-- Schritt 8: amdgpu mit Firmware; NVIDIA nur dokumentiert
+- Schritt 8: amdgpu (Modul) und veyra-firmware-amd-grafik gebaut, i915 als Modul; auf Hardware ungeprüft
 - SOF erst nach den Hardware-Ergebnissen
 - Signaturprüfung der Quellen von Stufe 6, 0.7-Pakete ins signierte Hauptrepository
