@@ -335,9 +335,9 @@ def start3(platte, logdir, tmp):
                 raise Fehler(f"{fehlstarts} Fehlstarts statt 3 vor dem Rueckfall")
             ok("nach 3 Fehlstarts startet wieder der alte Kernel bis zur Anmeldung")
             vm.anmelden("root", ROOT_PW, versuche=3)
-            vm.befehl("uname -r; echo UN-$((4+5))", r"veyra[0-9]+\s*\r?\n[^\n]*UN-9")
+            vm.befehl("uname -r; echo UN-$((4+5))", r"veyra[0-9]+\s*\r?\n[\s\S]*UN-9")
             vm.befehl("veyra-kernel-update liste; echo KL-$((5+5))",
-                      r"6\.18\.99-kaputt +schlecht[^\n]*\n[^\n]*gut +<- laeuft[^\n]*\n[^\n]*KL-10")
+                      r"6\.18\.99-kaputt +schlecht[^\n]*\n[\s\S]*?gut +<- laeuft[\s\S]*KL-10")
             ok("veyra-kernel-update liste: neuer Kernel schlecht, alter laeuft")
             vm.befehl("veyra-kernel-update entferne 6.18.99-kaputt; echo KE-$?-$((6+6))", r"KE-0-12")
             ok("schlechten Kernel entfernt")
